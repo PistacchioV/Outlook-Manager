@@ -45,8 +45,11 @@ manager.iniciar_worker()
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    """Renderiza o painel web."""
-    return render_template("index.html")
+    """Renderiza o painel web (sem cache, p/ sempre servir a UI mais recente)."""
+    resp = app.make_response(render_template("index.html"))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # ---------------------------------------------------------------------------
