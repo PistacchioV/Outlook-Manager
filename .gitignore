@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Configuração local (pode conter e-mails internos da empresa)
+config.json
+config.json.tmp
+
+# Logs
+*.log
+
+# SO / editores
+.DS_Store
+.idea/
+.vscode/

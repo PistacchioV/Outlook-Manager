@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OTC Derivatives - Outlook Manager</title>
+
+  <!-- Tipografia: Inter (mesma família de produtos como Linear/Vercel) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Bootstrap 5 + Bootstrap Icons via CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+
+  <style>
+    /* =================================================================
+       DESIGN TOKENS
+       Curvas de easing fortes (as nativas do CSS são fracas demais).
+       ================================================================= */
+    :root {
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);       /* entradas / responsivo */
+      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);   /* movimento na tela */
+
+      --dur-press: 140ms;
+      --dur-hover: 200ms;
+      --dur-enter: 320ms;
+
+      --radius: 14px;
+      --radius-sm: 10px;
+
+      --accent: #6366f1;          /* indigo */
+      --accent-soft: #818cf8;
+    }
+
+    /* Paleta sutil por tema, sobreposta ao Bootstrap. */
+    [data-bs-theme="light"] {
+      --app-bg: radial-gradient(1200px 600px at 80% -10%, #eef2ff 0%, transparent 60%),
+                radial-gradient(1000px 500px at -10% 10%, #f5f3ff 0%, transparent 55%),
+                #f7f8fb;
+      --card-bg: rgba(255, 255, 255, 0.72);
+      --card-border: rgba(17, 24, 39, 0.08);
+      --nav-bg: rgba(255, 255, 255, 0.65);
+      --shadow-hover: 0 12px 32px -8px rgba(49, 46, 129, 0.18);
+    }
+    [data-bs-theme="dark"] {
+      --app-bg: radial-gradient(1200px 600px at 80% -10%, #1e1b4b 0%, transparent 55%),
+                radial-gradient(1000px 500px at -10% 10%, #172554 0%, transparent 50%),
+                #0b0d12;
+      --card-bg: rgba(22, 24, 32, 0.72);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --nav-bg: rgba(15, 17, 23, 0.6);
+      --shadow-hover: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+    }
+
+    * { -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background: var(--app-bg);
+      background-attachment: fixed;
+      min-height: 100vh;
+      letter-spacing: -0.011em;
+      /* Troca de tema suave (ocasional, então transição leve e curta). */
+      transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+    }
+
+    /* ---------------- NAVBAR (glass) ---------------- */
+    .app-navbar {
+      background: var(--nav-bg);
+      backdrop-filter: saturate(180%) blur(14px);
+      -webkit-backdrop-filter: saturate(180%) blur(14px);
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      z-index: 1020;
+    }
+    .brand-badge {
+      width: 34px; height: 34px;
+      display: grid; place-items: center;
+      border-radius: 10px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.5);
+    }
+    .brand-title { font-weight: 700; font-size: 1.02rem; letter-spacing: -0.02em; }
+
+    /* ---------------- CARDS ---------------- */
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: saturate(160%) blur(10px);
+      -webkit-backdrop-filter: saturate(160%) blur(10px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .glass-card .card-header {
+      background: transparent;
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    /* ---------------- BOTÕES: feedback de press ---------------- */
+    .btn, .icon-btn, .btn-close {
+      transition: transform var(--dur-press) var(--ease-out),
+                  background-color var(--dur-hover) ease,
+                  border-color var(--dur-hover) ease,
+                  box-shadow var(--dur-hover) ease;
+    }
+    .btn:active, .icon-btn:active { transform: scale(0.96); }
+
+    .icon-btn {
+      width: 38px; height: 38px;
+      display: grid; place-items: center;
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--bs-body-color);
+      cursor: pointer;
+      font-size: 1.05rem;
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+    }
+    /* Ícone do tema gira sutilmente ao trocar. */
+    .icon-btn i { transition: transform var(--dur-hover) var(--ease-out); }
+
+    /* ---------------- BADGES (chips de config) ---------------- */
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 8px 5px 11px;
+      border-radius: 999px;
+      font-size: 0.8rem; font-weight: 500;
+      border: 1px solid transparent;
+      transform-origin: center;
+      transition: transform var(--dur-press) var(--ease-out),
+                  opacity var(--dur-press) ease;
+    }
+    .chip-key { background: rgba(99,102,241,0.12); color: var(--accent); border-color: rgba(99,102,241,0.22); }
+    .chip-person { background: rgba(16,185,129,0.12); color: #059669; border-color: rgba(16,185,129,0.22); }
+    [data-bs-theme="dark"] .chip-person { color: #34d399; }
+    .chip .chip-x {
+      width: 16px; height: 16px; border-radius: 50%;
+      display: grid; place-items: center;
+      border: none; cursor: pointer; font-size: 0.7rem; line-height: 1;
+      background: transparent; color: inherit; opacity: 0.65;
+      transition: opacity var(--dur-press) ease, background-color var(--dur-press) ease;
+    }
+    .chip .chip-x:hover { opacity: 1; background: rgba(0,0,0,0.1); }
+    /* Chip removível some encolhendo (exit rápido). */
+    .chip.removing { transform: scale(0.8); opacity: 0; }
+
+    /* ---------------- TÓPICOS (feed) ---------------- */
+    .topico-card {
+      background: var(--card-bg);
+      backdrop-filter: saturate(160%) blur(10px);
+      -webkit-backdrop-filter: saturate(160%) blur(10px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      will-change: transform, opacity;
+      /* Hover suave; só transform/opacity/shadow (GPU). */
+      transition: transform var(--dur-hover) var(--ease-out),
+                  box-shadow var(--dur-hover) var(--ease-out),
+                  opacity var(--dur-enter) var(--ease-out);
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .topico-card:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-hover);
+        border-color: rgba(99,102,241,0.35);
+      }
+    }
+    /* Estado de entrada — animado via .is-entering -> remove no próximo frame. */
+    .topico-card.is-entering { opacity: 0; transform: translateY(10px); }
+    .topico-card.is-leaving { opacity: 0; transform: translateY(-6px) scale(0.98); }
+
+    .topico-assunto { font-weight: 600; font-size: 1rem; letter-spacing: -0.015em; }
+    .pessoa-destaque {
+      font-weight: 600; color: var(--accent);
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .pessoa-avatar {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: grid; place-items: center;
+      font-size: 0.65rem; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+    }
+    .resumo {
+      font-size: 0.875rem; line-height: 1.5;
+      color: var(--bs-secondary-color);
+    }
+    .resumo .bi-stars { color: var(--accent-soft); }
+    .motivo-tag {
+      font-size: 0.7rem; font-weight: 500;
+      padding: 3px 8px; border-radius: 6px;
+      background: rgba(120,120,140,0.1);
+      border: 1px solid var(--card-border);
+      color: var(--bs-secondary-color);
+    }
+    .count-pill {
+      font-size: 0.72rem; font-weight: 600;
+      padding: 2px 9px; border-radius: 999px;
+      background: rgba(120,120,140,0.12);
+      color: var(--bs-secondary-color);
+    }
+
+    /* ---------------- STATUS (dot pulsante) ---------------- */
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+    }
+    .status-pill {
+      display: inline-flex; align-items: center;
+      font-size: 0.76rem; font-weight: 500;
+      padding: 5px 11px; border-radius: 999px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+    }
+    .dot-ok { background: #10b981; box-shadow: 0 0 0 0 rgba(16,185,129,0.6); animation: pulse-ring 2s var(--ease-out) infinite; }
+    .dot-warn { background: #f59e0b; }
+    .dot-err { background: #ef4444; }
+    @keyframes pulse-ring {
+      0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+      70%  { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+
+    .form-control:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.18);
+    }
+    .empty-feed {
+      text-align: center; padding: 48px 20px;
+      color: var(--bs-secondary-color); font-style: italic;
+    }
+
+    /* ---------------- ACESSIBILIDADE ----------------
+       Reduz movimento: mantém opacidade/cor, remove deslocamentos. */
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+      .topico-card, .chip, .btn, .icon-btn { transition: opacity 150ms ease, background-color 150ms ease; }
+      .topico-card.is-entering { transform: none; }
+      .topico-card:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===================== NAVBAR ===================== -->
+  <nav class="app-navbar">
+    <div class="container-fluid d-flex align-items-center justify-content-between py-2 px-3">
+      <div class="d-flex align-items-center gap-2">
+        <span class="brand-badge"><i class="bi bi-graph-up-arrow"></i></span>
+        <span class="brand-title">OTC Derivatives <span class="text-secondary fw-normal">·</span> Outlook Manager</span>
+      </div>
+
+      <div class="d-flex align-items-center gap-2">
+        <span id="status-pill" class="status-pill">
+          <span id="status-dot" class="status-dot dot-warn"></span>
+          <span id="status-text">conectando…</span>
+        </span>
+        <button id="btn-varrer" class="icon-btn" title="Varrer agora" aria-label="Varrer agora">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+        <button id="btn-tema" class="icon-btn" title="Alternar tema" aria-label="Alternar tema">
+          <i class="bi bi-moon-stars"></i>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================== CORPO ===================== -->
+  <div class="container-fluid px-3 px-lg-4 py-4">
+    <div class="row g-4">
+
+      <!-- ---------- COLUNA ESQUERDA: PAINEL DE CONTROLE ---------- -->
+      <div class="col-md-4">
+
+        <div class="glass-card card mb-4">
+          <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-tags-fill" style="color:var(--accent)"></i> Palavras-chave
+          </div>
+          <div class="card-body">
+            <form id="form-palavra" class="input-group mb-3">
+              <input id="input-palavra" type="text" class="form-control" placeholder="ex.: urgente" autocomplete="off" />
+              <button class="btn btn-primary" type="submit" aria-label="Adicionar"><i class="bi bi-plus-lg"></i></button>
+            </form>
+            <div id="lista-palavras" class="d-flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+
+        <div class="glass-card card mb-4">
+          <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-person-rolodex" style="color:#10b981"></i> Pessoas-chave (e-mails)
+          </div>
+          <div class="card-body">
+            <form id="form-pessoa" class="input-group mb-3">
+              <input id="input-pessoa" type="email" class="form-control" placeholder="ex.: chefe@empresa.com" autocomplete="off" />
+              <button class="btn btn-success" type="submit" aria-label="Adicionar"><i class="bi bi-plus-lg"></i></button>
+            </form>
+            <div id="lista-pessoas" class="d-flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+
+        <div class="glass-card card">
+          <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-clock-history" style="color:#f59e0b"></i> Intervalo de varredura
+          </div>
+          <div class="card-body">
+            <form id="form-intervalo" class="input-group">
+              <input id="input-intervalo" type="number" min="30" step="30" class="form-control" placeholder="300" />
+              <span class="input-group-text">seg</span>
+              <button class="btn btn-warning" type="submit">Salvar</button>
+            </form>
+            <small class="text-secondary">Mínimo 30s · Padrão 300s (5 min)</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- COLUNA DIREITA: LISTA DE TÓPICOS ---------- -->
+      <div class="col-md-8">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="mb-0 fw-semibold"><i class="bi bi-collection-fill me-1" style="color:var(--accent)"></i> Tópicos relevantes</h5>
+          <small id="info-varredura" class="text-secondary"></small>
+        </div>
+        <div id="feed-topicos" class="d-flex flex-column gap-3"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+  // =====================================================================
+  // 1) TEMA (Light / Dark) — data-bs-theme nativo do Bootstrap 5
+  //    Troca é ação ocasional: pode ter micro-animação no ícone.
+  // =====================================================================
+  const htmlEl = document.documentElement;
+  const btnTema = document.getElementById("btn-tema");
+
+  function aplicarTema(tema) {
+    htmlEl.setAttribute("data-bs-theme", tema);
+    localStorage.setItem("tema", tema);
+    const icon = btnTema.querySelector("i");
+    icon.className = tema === "dark" ? "bi bi-sun" : "bi bi-moon-stars";
+    // Pequeno giro como feedback da troca.
+    icon.style.transform = "rotate(360deg)";
+    setTimeout(() => { icon.style.transform = ""; }, 220);
+  }
+
+  (function initTema() {
+    const salvo = localStorage.getItem("tema");
+    const prefereDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    aplicarTema(salvo || (prefereDark ? "dark" : "light"));
+  })();
+
+  btnTema.addEventListener("click", () => {
+    aplicarTema(htmlEl.getAttribute("data-bs-theme") === "dark" ? "light" : "dark");
+  });
+
+  // =====================================================================
+  // 2) HELPERS
+  // =====================================================================
+  async function api(url, method = "GET", body = null) {
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    return resp.json();
+  }
+  function escapeHtml(s) {
+    return (s ?? "").toString()
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function iniciais(nome) {
+    const partes = (nome || "?").trim().split(/[\s@.]+/).filter(Boolean);
+    return ((partes[0]?.[0] || "?") + (partes[1]?.[0] || "")).toUpperCase();
+  }
+
+  // =====================================================================
+  // 3) CONFIG (chips com 'x') — exit animado ao remover
+  // =====================================================================
+  function chipHtml(valor, classe, tipo) {
+    return `<span class="chip ${classe}" data-valor="${escapeHtml(valor)}">
+      ${escapeHtml(valor)}
+      <button class="chip-x" data-tipo="${tipo}" data-valor="${escapeHtml(valor)}" aria-label="Remover">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </span>`;
+  }
+  function renderConfig(cfg) {
+    const lp = document.getElementById("lista-palavras");
+    lp.innerHTML = cfg.palavras_chave.map(p => chipHtml(p, "chip-key", "palavra")).join("")
+      || '<small class="text-secondary">Nenhuma cadastrada.</small>';
+
+    const lpe = document.getElementById("lista-pessoas");
+    lpe.innerHTML = cfg.pessoas_chave.map(p => chipHtml(p, "chip-person", "pessoa")).join("")
+      || '<small class="text-secondary">Nenhuma cadastrada.</small>';
+
+    document.getElementById("input-intervalo").placeholder = cfg.intervalo_segundos;
+  }
+
+  // Remoção: anima o chip saindo (.removing) antes do request, sem esperar a UI.
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest(".chip-x[data-tipo]");
+    if (!btn) return;
+    const { tipo, valor } = btn.dataset;
+    const chip = btn.closest(".chip");
+    if (chip) chip.classList.add("removing");
+    const url = tipo === "palavra" ? "/api/palavras" : "/api/pessoas";
+    const cfg = await api(url, "DELETE", { valor });
+    // Espera o exit do chip terminar antes de re-renderizar (evita "pulo").
+    setTimeout(() => renderConfig(cfg), 150);
+  });
+
+  // =====================================================================
+  // 4) FORMULÁRIOS
+  // =====================================================================
+  function bindForm(formId, inputId, url) {
+    document.getElementById(formId).addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById(inputId);
+      const valor = input.value.trim();
+      if (!valor) return;
+      const cfg = await api(url, "POST", { valor });
+      input.value = "";
+      renderConfig(cfg);
+    });
+  }
+  bindForm("form-palavra", "input-palavra", "/api/palavras");
+  bindForm("form-pessoa", "input-pessoa", "/api/pessoas");
+
+  document.getElementById("form-intervalo").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("input-intervalo");
+    const seg = parseInt(input.value, 10);
+    if (!seg) return;
+    const cfg = await api("/api/intervalo", "POST", { segundos: seg });
+    input.value = "";
+    renderConfig(cfg);
+  });
+
+  const btnVarrer = document.getElementById("btn-varrer");
+  btnVarrer.addEventListener("click", async () => {
+    btnVarrer.querySelector("i").style.transform = "rotate(360deg)";
+    setTimeout(() => { btnVarrer.querySelector("i").style.transform = ""; }, 400);
+    await api("/api/varrer-agora", "POST");
+    setTimeout(atualizarTopicos, 1200);
+  });
+
+  // =====================================================================
+  // 5) STATUS
+  // =====================================================================
+  function renderStatus(data) {
+    const dot = document.getElementById("status-dot");
+    const text = document.getElementById("status-text");
+    if (data.modo_simulado) {
+      dot.className = "status-dot dot-warn";
+      text.textContent = "Modo simulado";
+    } else if ((data.status_worker || "").startsWith("rodando")) {
+      dot.className = "status-dot dot-ok";
+      text.textContent = "Outlook conectado";
+    } else {
+      dot.className = "status-dot dot-err";
+      text.textContent = (data.status_worker || "erro").slice(0, 40);
+    }
+    document.getElementById("info-varredura").textContent =
+      data.ultima_varredura ? `Última varredura · ${data.ultima_varredura}` : "";
+  }
+
+  // =====================================================================
+  // 6) FEED DE TÓPICOS — reconciliação por chave
+  //    Em vez de reescrever innerHTML a cada poll (flash + re-anima tudo),
+  //    mantemos um Map chave->elemento: atualizamos no lugar, animamos só
+  //    os novos (entrada) e os removidos (saída).
+  // =====================================================================
+  const feed = document.getElementById("feed-topicos");
+  const renderedCards = new Map();   // chave -> { el, sig }
+  let firstLoad = true;
+
+  function cardInnerHtml(t) {
+    const motivos = (t.motivos || [])
+      .map(m => `<span class="motivo-tag">${escapeHtml(m)}</span>`).join("");
+    const participantes = (t.participantes || []).join(", ");
+    return `
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div class="topico-assunto">${escapeHtml(t.assunto)}</div>
+        <span class="count-pill">${t.qtd_mensagens} msg${t.qtd_mensagens > 1 ? "s" : ""}</span>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <span class="pessoa-destaque">
+          <span class="pessoa-avatar">${escapeHtml(iniciais(t.pessoa_destaque))}</span>
+          ${escapeHtml(t.pessoa_destaque)}
+        </span>
+        <span class="text-secondary small">· ${escapeHtml(participantes)}</span>
+      </div>
+      <p class="resumo mb-3"><i class="bi bi-stars me-1"></i>${escapeHtml(t.resumo)}</p>
+      <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        <div class="d-flex flex-wrap gap-1">${motivos}</div>
+        <small class="text-secondary"><i class="bi bi-clock me-1"></i>${escapeHtml(t.ultima_atualizacao)}</small>
+      </div>`;
+  }
+
+  // Assinatura para decidir se precisa reescrever o conteúdo do card.
+  function assinatura(t) {
+    return JSON.stringify([t.assunto, t.pessoa_destaque, t.qtd_mensagens,
+                           t.resumo, t.ultima_atualizacao, t.motivos, t.participantes]);
+  }
+
+  function renderTopicos(data) {
+    renderStatus(data);
+    const topicos = data.topicos || [];
+
+    // Estado vazio.
+    if (topicos.length === 0 && renderedCards.size === 0) {
+      feed.innerHTML = `<div class="empty-feed">
+        <i class="bi bi-inbox" style="font-size:2rem;opacity:.5;"></i>
+        <div class="mt-2">Nenhum tópico relevante ainda.<br>Aguarde a próxima varredura.</div>
+      </div>`;
+      return;
+    }
+    if (feed.querySelector(".empty-feed")) feed.innerHTML = "";
+
+    const chavesAtuais = new Set(topicos.map(t => t.chave));
+
+    // Remoção: anima saída dos que sumiram.
+    for (const [chave, info] of renderedCards) {
+      if (!chavesAtuais.has(chave)) {
+        info.el.classList.add("is-leaving");
+        setTimeout(() => info.el.remove(), 240);
+        renderedCards.delete(chave);
+      }
+    }
+
+    // Inserção / atualização, na ordem recebida (mais recente primeiro).
+    topicos.forEach((t, idx) => {
+      const sig = assinatura(t);
+      let info = renderedCards.get(t.chave);
+
+      if (!info) {
+        // Card novo: cria, anima entrada (stagger só na 1ª carga).
+        const el = document.createElement("div");
+        el.className = "topico-card is-entering";
+        el.dataset.chave = t.chave;
+        el.innerHTML = cardInnerHtml(t);
+        feed.appendChild(el);
+        const delay = firstLoad ? idx * 55 : 0;   // stagger curto
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          el.style.transitionDelay = delay + "ms";
+          el.classList.remove("is-entering");
+          setTimeout(() => { el.style.transitionDelay = ""; }, 400 + delay);
+        }));
+        info = { el, sig };
+        renderedCards.set(t.chave, info);
+      } else if (info.sig !== sig) {
+        // Conteúdo mudou: atualiza no lugar (sem re-animar entrada).
+        info.el.innerHTML = cardInnerHtml(t);
+        info.sig = sig;
+      }
+      // Mantém a ordem do DOM coerente com a ordem dos dados.
+      feed.appendChild(info.el);
+    });
+
+    firstLoad = false;
+  }
+
+  // =====================================================================
+  // 7) POLLING
+  // =====================================================================
+  async function atualizarTopicos() {
+    try { renderTopicos(await api("/api/topicos")); }
+    catch (err) { console.error("Falha ao buscar tópicos:", err); }
+  }
+  async function carregarConfigInicial() {
+    renderConfig(await api("/api/config"));
+  }
+
+  carregarConfigInicial();
+  atualizarTopicos();
+  setInterval(atualizarTopicos, 15000);
+  </script>
+</body>
+</html>
