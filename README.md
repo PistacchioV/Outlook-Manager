@@ -89,5 +89,14 @@ docstring da função.
 | POST   | `/api/pessoas`        | Adiciona remetente-chave           |
 | DELETE | `/api/pessoas`        | Remove remetente-chave             |
 | POST   | `/api/intervalo`      | Ajusta intervalo (segundos)        |
+| POST   | `/api/conta`          | Define a conta/mailbox lida (SMTP) |
 | GET    | `/api/topicos`        | Tópicos agrupados (consumido no polling) |
 | POST   | `/api/varrer-agora`   | Dispara varredura imediata         |
+
+## Conta conectada
+
+O app lê a Inbox da conta configurada em **"Conta conectada"** no painel
+(padrão: `giulliano.luccia@jpmorgan.com`). Numa máquina corporativa com várias
+contas/mailboxes, ele localiza a Account pelo endereço SMTP e usa o Inbox do
+respectivo `DeliveryStore` — independente do idioma do Outlook. Campo vazio =
+conta padrão do perfil. A configuração persiste em `config.json` (não versionado).

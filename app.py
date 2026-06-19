@@ -81,6 +81,14 @@ def intervalo():
     return jsonify(manager.get_config())
 
 
+@app.route("/api/conta", methods=["POST"])
+def conta():
+    """Define a conta/mailbox do Outlook a ser lida (SMTP)."""
+    valor = (request.get_json(silent=True) or {}).get("valor", "")
+    manager.set_conta(valor)
+    return jsonify(manager.get_config())
+
+
 # ---------------------------------------------------------------------------
 # Tópicos / varredura
 # ---------------------------------------------------------------------------

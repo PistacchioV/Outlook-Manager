@@ -156,6 +156,10 @@ class OutlookManager:
         self.palavras_chave: List[str] = ["urgente", "faturamento", "bug"]
         self.pessoas_chave: List[str] = []
         self.intervalo_segundos: int = intervalo_segundos
+        # Conta/mailbox do Outlook a ser lida. Numa máquina corporativa pode
+        # haver várias contas; aqui miramos uma SMTP específica. Vazio = usa a
+        # conta padrão do Outlook (GetDefaultFolder).
+        self.conta_email: str = "giulliano.luccia@jpmorgan.com"
 
         # ----- Estado de resultados -----
         # Dicionário: chave_topico -> dados do tópico (ver _montar_topico).
@@ -186,6 +190,7 @@ class OutlookManager:
             self.intervalo_segundos = int(
                 dados.get("intervalo_segundos", self.intervalo_segundos)
             )
+            self.conta_email = str(dados.get("conta_email", self.conta_email))
         except FileNotFoundError:
             pass  # primeira execução: mantém os defaults
         except Exception:
@@ -200,6 +205,7 @@ class OutlookManager:
             "palavras_chave": self.palavras_chave,
             "pessoas_chave": self.pessoas_chave,
             "intervalo_segundos": self.intervalo_segundos,
+            "conta_email": self.conta_email,
         }
         try:
             tmp = _CONFIG_PATH + ".tmp"
@@ -251,12 +257,21 @@ class OutlookManager:
             self.intervalo_segundos = max(30, int(segundos))
             self._salvar_config()
 
+    def set_conta(self, email: str) -> None:
+        """Define a conta/mailbox alvo. Vazio = conta padrão do Outlook."""
+        with self._lock:
+            self.conta_email = email.strip()
+            self._salvar_config()
+        # Força nova varredura para refletir a troca de caixa na hora.
+        self._wake_event.set()
+
     def get_config(self) -> Dict[str, Any]:
         with self._lock:
             return {
                 "palavras_chave": list(self.palavras_chave),
                 "pessoas_chave": list(self.pessoas_chave),
                 "intervalo_segundos": self.intervalo_segundos,
+                "conta_email": self.conta_email,
             }
 
     def get_topicos(self) -> Dict[str, Any]:
@@ -372,8 +387,8 @@ class OutlookManager:
                 f"Detalhe técnico: {exc}"
             ) from exc
 
-        # 6 == olFolderInbox (constante padrão do Outlook).
-        inbox = namespace.GetDefaultFolder(6)
+        # Seleciona a Inbox da conta-alvo (ou a padrão se não configurada).
+        inbox = self._obter_inbox(namespace)
 
         itens = inbox.Items
         itens.Sort("[ReceivedTime]", True)  # mais novos primeiro
@@ -405,6 +420,51 @@ class OutlookManager:
             except Exception:
                 continue  # item problemático não derruba a varredura
         return emails
+
+    def _obter_inbox(self, namespace: Any) -> Any:
+        """Retorna a Inbox da conta-alvo (``self.conta_email``).
+
+        Estratégia (numa máquina corporativa há várias contas/stores):
+          1. Procura a Account cujo SMTP bate com ``conta_email`` e usa o
+             Inbox do seu ``DeliveryStore`` (independe do idioma do Outlook).
+          2. Fallback: procura um Store cujo nome contenha o e-mail.
+          3. Fallback final: ``GetDefaultFolder(6)`` (conta padrão).
+
+        Levanta ``RuntimeError`` se a conta foi configurada mas não foi
+        encontrada, para o erro aparecer no painel.
+        """
+        with self._lock:
+            alvo = _normalizar(self.conta_email)
+
+        # 6 == olFolderInbox (constante padrão do Outlook).
+        if not alvo:
+            return namespace.GetDefaultFolder(6)
+
+        # 1) Por Account (forma mais robusta).
+        try:
+            for account in namespace.Session.Accounts:
+                smtp = _normalizar(getattr(account, "SmtpAddress", "") or "")
+                if smtp == alvo:
+                    store = account.DeliveryStore
+                    return store.GetDefaultFolder(6)
+        except Exception:
+            pass
+
+        # 2) Por Store (nome costuma ser o próprio e-mail).
+        try:
+            for store in namespace.Stores:
+                nome = _normalizar(getattr(store, "DisplayName", "") or "")
+                if alvo in nome:
+                    return store.GetDefaultFolder(6)
+        except Exception:
+            pass
+
+        # 3) Não achou a conta configurada: erro explícito no painel.
+        raise RuntimeError(
+            f"Conta '{self.conta_email}' não encontrada no Outlook. "
+            "Verifique se o perfil está logado nessa caixa (Arquivo > "
+            "Configurações de Conta) ou ajuste o e-mail no painel."
+        )
 
     @staticmethod
     def _extrair_email_remetente(item: Any) -> str:

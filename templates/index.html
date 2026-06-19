@@ -281,6 +281,20 @@
 
         <div class="glass-card card mb-4">
           <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-envelope-at-fill" style="color:var(--accent)"></i> Conta conectada
+          </div>
+          <div class="card-body">
+            <form id="form-conta" class="input-group">
+              <span class="input-group-text"><i class="bi bi-person-badge"></i></span>
+              <input id="input-conta" type="email" class="form-control" placeholder="usuario@jpmorgan.com" autocomplete="off" />
+              <button class="btn btn-primary" type="submit" aria-label="Salvar conta"><i class="bi bi-check-lg"></i></button>
+            </form>
+            <small class="text-secondary">Mailbox do Outlook que será lida. Vazio = conta padrão.</small>
+          </div>
+        </div>
+
+        <div class="glass-card card mb-4">
+          <div class="card-header d-flex align-items-center gap-2">
             <i class="bi bi-tags-fill" style="color:var(--accent)"></i> Palavras-chave
           </div>
           <div class="card-body">
@@ -402,6 +416,12 @@
       || '<small class="text-secondary">Nenhuma cadastrada.</small>';
 
     document.getElementById("input-intervalo").placeholder = cfg.intervalo_segundos;
+
+    // Conta conectada: só preenche se o campo não estiver em edição (focado).
+    const inputConta = document.getElementById("input-conta");
+    if (document.activeElement !== inputConta) {
+      inputConta.value = cfg.conta_email || "";
+    }
   }
 
   // Remoção: anima o chip saindo (.removing) antes do request, sem esperar a UI.
@@ -433,6 +453,16 @@
   }
   bindForm("form-palavra", "input-palavra", "/api/palavras");
   bindForm("form-pessoa", "input-pessoa", "/api/pessoas");
+
+  // Conta conectada: aceita string vazia (= conta padrão), então não usa bindForm.
+  document.getElementById("form-conta").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("input-conta");
+    const cfg = await api("/api/conta", "POST", { valor: input.value.trim() });
+    input.blur();
+    renderConfig(cfg);
+    setTimeout(atualizarTopicos, 1200);  // reflete a troca de caixa
+  });
 
   document.getElementById("form-intervalo").addEventListener("submit", async (e) => {
     e.preventDefault();
