@@ -426,6 +426,12 @@ class OutlookManager:
             target=self._worker_loop, name="OutlookWorker", daemon=True
         )
         self._thread.start()
+        modo = "SIMULADO" if MODO_SIMULADO else "OUTLOOK (pywin32)"
+        print(
+            f"[worker] iniciado | modo={modo} | conta-alvo={self.conta_email or '(padrão)'}"
+            f" | intervalo={self.intervalo_segundos}s",
+            flush=True,
+        )
 
     def parar_worker(self) -> None:
         """Sinaliza parada e aguarda a thread encerrar."""
@@ -508,9 +514,17 @@ class OutlookManager:
                 emails = self._coletar_emails_outlook()
             self._processar_emails(emails)
             self.ultima_varredura = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            # Log no console: confirma que a varredura rodou e o que achou.
+            print(
+                f"[worker] varredura {self.ultima_varredura} | conta="
+                f"{self.conta_conectada} | {len(emails)} e-mails lidos | "
+                f"{len(self._topicos)} tópico(s) relevante(s)",
+                flush=True,
+            )
         except Exception as exc:  # noqa: BLE001  (logamos e seguimos)
             self.status_worker = f"erro: {exc}"
             self.conta_conectada = None  # não confirmamos a caixa
+            print(f"[worker] ERRO na varredura: {exc}", flush=True)
 
     # ----------------------------------------------------------------- #
     # Coleta — Outlook real                                             #
@@ -541,8 +555,10 @@ class OutlookManager:
         itens.Sort("[ReceivedTime]", True)  # mais novos primeiro
 
         # Filtro DASL/Restrict por data para não varrer a caixa inteira.
+        # IMPORTANTE: usar %I (12h) com %p (AM/PM) — misturar %H (24h) com %p
+        # gera um horário inválido que o Outlook rejeita.
         limite = datetime.now() - timedelta(days=7)
-        filtro = "[ReceivedTime] >= '" + limite.strftime("%m/%d/%Y %H:%M %p") + "'"
+        filtro = "[ReceivedTime] >= '" + limite.strftime("%m/%d/%Y %I:%M %p") + "'"
         try:
             itens = itens.Restrict(filtro)
         except Exception:
