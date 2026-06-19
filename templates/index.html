@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Traffic Control - Outlook Manager</title>
 
+  <!-- Favicon (logo "Flow Lanes") -->
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
+
   <!-- Tipografia: Inter (mesma família de produtos como Linear/Vercel) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -76,14 +79,7 @@
       top: 0;
       z-index: 1020;
     }
-    .brand-badge {
-      width: 34px; height: 34px;
-      display: grid; place-items: center;
-      border-radius: 10px;
-      color: #fff;
-      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
-      box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.5);
-    }
+    .brand-logo { display: block; flex-shrink: 0; }
     .brand-title { font-weight: 700; font-size: 1.02rem; letter-spacing: -0.02em; }
 
     /* ---------------- CARDS ---------------- */
@@ -330,7 +326,14 @@
   <nav class="app-navbar">
     <div class="container-fluid d-flex align-items-center justify-content-between py-2 px-3">
       <div class="d-flex align-items-center gap-2">
-        <span class="brand-badge"><i class="bi bi-graph-up-arrow"></i></span>
+        <svg class="brand-logo" viewBox="0 0 64 64" width="36" height="36" aria-label="Traffic Control">
+          <rect x="7" y="15" width="50" height="34" rx="8" fill="none" stroke="#0078D4" stroke-width="4"/>
+          <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 24 L28 32 L20 40" stroke="#0A5FBF"/>
+            <path d="M30 24 L38 32 L30 40" stroke="#0078D4"/>
+            <path d="M40 24 L48 32 L40 40" stroke="#1FD173"/>
+          </g>
+        </svg>
         <span class="brand-title">Traffic Control <span class="text-secondary fw-normal">·</span> Outlook Manager</span>
       </div>
 
