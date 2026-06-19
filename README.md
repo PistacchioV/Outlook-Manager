@@ -1,4 +1,4 @@
-# OTC Derivatives - Outlook Manager
+# Traffic Control - Outlook Manager
 
 Painel web local (Flask + Bootstrap 5) que varre o **Inbox do Outlook**
 periodicamente, filtra e-mails por **palavras-chave** ou **remetentes-chave**,
