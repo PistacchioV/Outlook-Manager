@@ -252,6 +252,8 @@ class OutlookManager:
         # haver várias contas; aqui miramos uma SMTP específica. Vazio = usa a
         # conta padrão do Outlook (GetDefaultFolder).
         self.conta_email: str = "giulliano.luccia@jpmorgan.com"
+        # Janela de varredura: só considera e-mails dos últimos N dias.
+        self.dias_janela: int = 7
 
         # ----- Estado de resultados -----
         # Dicionário: chave_topico -> dados do tópico (ver _montar_topico).
@@ -552,24 +554,41 @@ class OutlookManager:
         inbox = self._obter_inbox(namespace)
 
         itens = inbox.Items
-        itens.Sort("[ReceivedTime]", True)  # mais novos primeiro
-
-        # Filtro DASL/Restrict por data para não varrer a caixa inteira.
-        # IMPORTANTE: usar %I (12h) com %p (AM/PM) — misturar %H (24h) com %p
-        # gera um horário inválido que o Outlook rejeita.
-        limite = datetime.now() - timedelta(days=7)
-        filtro = "[ReceivedTime] >= '" + limite.strftime("%m/%d/%Y %I:%M %p") + "'"
         try:
-            itens = itens.Restrict(filtro)
+            itens.Sort("[ReceivedTime]", True)  # mais novos primeiro
         except Exception:
-            pass  # se o filtro falhar, seguimos com todos os itens
+            pass
+
+        # Janela de tempo SEM Restrict por string de data: a string do
+        # Restrict é interpretada no FORMATO REGIONAL do Windows (em pt-BR é
+        # dd/MM/yyyy), então uma string em formato americano falha ou zera o
+        # filtro. Como os itens já vêm ordenados do mais novo para o mais
+        # antigo, basta iterar e PARAR ao passar do limite — 100% independente
+        # de locale.
+        limite = datetime.now() - timedelta(days=self.dias_janela)
+
+        try:
+            total_inbox = itens.Count
+        except Exception:
+            total_inbox = -1
+        mais_recente: Optional[datetime] = None
 
         emails: List[Dict[str, Any]] = []
+        vistos = 0
         for item in itens:
+            vistos += 1
+            if vistos > 3000:          # trava de segurança p/ caixas enormes
+                break
             try:
                 # 43 == olMail (Class do MailItem). Ignora convites, etc.
                 if getattr(item, "Class", 43) != 43:
                     continue
+
+                recebido = self._to_datetime(getattr(item, "ReceivedTime", None))
+                if mais_recente is None:
+                    mais_recente = recebido
+                if recebido < limite:
+                    break              # ordenado desc: o resto é mais antigo
 
                 remetente = self._extrair_email_remetente(item)
                 emails.append({
@@ -577,11 +596,19 @@ class OutlookManager:
                     "remetente": remetente,
                     "remetente_nome": getattr(item, "SenderName", "") or remetente,
                     "corpo": getattr(item, "Body", "") or "",
-                    "recebido": self._to_datetime(getattr(item, "ReceivedTime", None)),
+                    "recebido": recebido,
                     "conversation_id": getattr(item, "ConversationID", "") or "",
                 })
             except Exception:
                 continue  # item problemático não derruba a varredura
+
+        recente_str = mais_recente.strftime("%d/%m/%Y %H:%M") if mais_recente else "—"
+        print(
+            f"[worker] caixa='{self.conta_conectada}' | itens na Inbox={total_inbox}"
+            f" | e-mail mais recente={recente_str} | {len(emails)} na janela de "
+            f"{self.dias_janela} dias",
+            flush=True,
+        )
         return emails
 
     def _obter_inbox(self, namespace: Any) -> Any:
