@@ -35,9 +35,11 @@ from typing import Any, Dict, List, Optional
 try:
     from google import genai  # type: ignore
     _IMPORT_OK = True
-except Exception:
+    _IMPORT_ERRO = ""
+except Exception as _exc:
     genai = None  # type: ignore
     _IMPORT_OK = False
+    _IMPORT_ERRO = f"{type(_exc).__name__}: {_exc}"
 
 _MODELO = os.environ.get("TC_GENAI_MODEL", "gemini-2.5-flash")
 _cliente: Optional[Any] = None
@@ -61,6 +63,33 @@ def ativo() -> bool:
     return _IMPORT_OK and _credenciais_presentes() and _falhas < _MAX_FALHAS
 
 
+def _modo() -> str:
+    if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in ("1", "true", "yes"):
+        proj = os.environ.get("GOOGLE_CLOUD_PROJECT", "(sem GOOGLE_CLOUD_PROJECT)")
+        loc = os.environ.get("GOOGLE_CLOUD_LOCATION", "(sem GOOGLE_CLOUD_LOCATION)")
+        return f"Vertex AI (projeto={proj}, location={loc})"
+    return "Gemini API (chave)"
+
+
+def log_estado() -> None:
+    """Imprime no console o estado do backend Gemini (chamado no boot do worker)."""
+    if not _IMPORT_OK:
+        print(f"[genai] biblioteca google-genai NÃO importada -> {_IMPORT_ERRO} "
+              "| usando resumo LOCAL.", flush=True)
+        return
+    if os.environ.get("TC_USE_GENAI", "").lower() in ("0", "false", "no"):
+        print("[genai] biblioteca OK, mas DESLIGADA por TC_USE_GENAI=0 "
+              "| usando resumo LOCAL.", flush=True)
+        return
+    if not _credenciais_presentes():
+        print("[genai] biblioteca OK, mas SEM credenciais no ambiente "
+              "(defina GOOGLE_API_KEY ou GOOGLE_GENAI_USE_VERTEXAI=1 + projeto) "
+              "| usando resumo LOCAL.", flush=True)
+        return
+    print(f"[genai] biblioteca OK e credenciais presentes | modo={_modo()} | "
+          f"modelo={_MODELO} | tentará conectar na 1ª varredura.", flush=True)
+
+
 def _get_cliente() -> Optional[Any]:
     """Cria (uma vez) o cliente Gemini conforme o ambiente. None se falhar."""
     global _cliente, _cliente_tentado
@@ -80,8 +109,11 @@ def _get_cliente() -> Optional[Any]:
         else:
             api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
             _cliente = genai.Client(api_key=api_key, http_options=http)
-    except Exception:
+        print(f"[genai] cliente criado com sucesso | modo={_modo()}", flush=True)
+    except Exception as exc:
         _cliente = None
+        print(f"[genai] FALHA ao criar o cliente -> {type(exc).__name__}: {exc}",
+              flush=True)
     return _cliente
 
 
@@ -95,11 +127,20 @@ def _gerar(prompt: str) -> Optional[str]:
         resp = cli.models.generate_content(model=_MODELO, contents=prompt)
         texto = (getattr(resp, "text", "") or "").strip()
         if texto:
+            if _falhas:
+                print("[genai] conexão restabelecida.", flush=True)
             _falhas = 0  # sucesso reseta o contador
             return texto
+        print("[genai] resposta vazia do modelo (sem texto) -> fallback local.",
+              flush=True)
         return None
-    except Exception:
+    except Exception as exc:
         _falhas += 1
+        print(f"[genai] FALHA na chamada ({_falhas}/{_MAX_FALHAS}) -> "
+              f"{type(exc).__name__}: {exc}", flush=True)
+        if _falhas >= _MAX_FALHAS:
+            print("[genai] desativando tentativas após falhas seguidas "
+                  "| seguindo 100% LOCAL.", flush=True)
         return None
 
 

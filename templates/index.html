@@ -225,6 +225,8 @@
       padding: 1px 6px; border-radius: 5px; text-transform: none;
     }
     .motor-tag.gemini { background: rgba(99,102,241,0.14); color: var(--accent); }
+    .motor-tag.gemini .bi { font-size: 0.6rem; }
+    .motor-tag.local { background: rgba(120,120,140,0.14); color: var(--bs-secondary-color); }
 
     /* ---------------- RESPOSTA SUGERIDA ---------------- */
     .resposta-box {
@@ -714,7 +716,9 @@
       <div class="bloco mb-2">
         <div class="bloco-label">
           <i class="bi bi-stars"></i> Resumo da conversa
-          ${t.resumo_fonte === "gemini" ? '<span class="motor-tag gemini">Gemini</span>' : ''}
+          ${t.resumo_fonte === "gemini"
+            ? '<span class="motor-tag gemini"><i class="bi bi-stars"></i> Gemini</span>'
+            : '<span class="motor-tag local">Local</span>'}
         </div>
         ${resumoHtml(t)}
       </div>
@@ -779,7 +783,7 @@
   // Assinatura para decidir se precisa reescrever o conteúdo do card.
   function assinatura(t) {
     return JSON.stringify([t.assunto, t.pessoa_destaque, t.qtd_mensagens,
-                           t.resumo, t.resposta_sugerida, t.qtd_resumos,
+                           t.resumo, t.resumo_fonte, t.resposta_sugerida, t.qtd_resumos,
                            t.ultima_atualizacao, t.motivos, t.participantes]);
   }
 

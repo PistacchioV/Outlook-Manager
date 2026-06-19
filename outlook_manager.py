@@ -478,6 +478,7 @@ class OutlookManager:
             f" | intervalo={self.intervalo_segundos}s",
             flush=True,
         )
+        genai_backend.log_estado()  # estado do backend Gemini (ativo/local/por quê)
 
     def parar_worker(self) -> None:
         """Sinaliza parada e aguarda a thread encerrar."""
