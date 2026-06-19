@@ -86,16 +86,22 @@ Cada varredura **acumula** o histórico de cada tópico em `historico_topicos.js
 - **Resposta sugerida:** gerada a partir do **histórico completo** do tópico e
   exibida em cada card, com botão "Copiar".
 
-## Plugar uma LLM (resumos e respostas)
+## Resumos e respostas — 100% local (sem LLM)
 
-Há dois pontos de extensão em `outlook_manager.py`, ambos com exemplo comentado
-do SDK da Anthropic (Claude) no docstring:
+Por restrição corporativa (DLP/compliance), **não há chamadas a APIs externas
+de LLM**. Todo o processamento de texto roda na própria máquina, de forma
+determinística, em `outlook_manager.py`:
 
-- `gerar_resumo(texto)` — resumo curto do tópico.
-- `propor_resposta(assunto, historico_texto, destinatario)` — rascunho de
-  resposta com o fio **completo** da conversa como contexto (é onde a LLM mais
-  agrega). Hoje ambos são heurísticas (regex); basta trocar o corpo por uma
-  chamada de API.
+- `gerar_resumo(texto)` — **sumarização extrativa**: pontua cada frase pela
+  frequência de palavras relevantes (descartando stopwords PT-BR), com bônus
+  para a 1ª frase e para frases com termos de ação (urgente, prazo, liquidação,
+  confirmar…), e escolhe as melhores reordenadas pela posição original.
+- `propor_resposta(assunto, historico_texto, destinatario)` — rascunho por
+  regras: detecta urgência, prazos, perguntas e pedidos de confirmação no
+  histórico completo e monta uma resposta cordial pronta para revisão.
+
+Para ajustar a saída, edite as listas `_STOPWORDS_PT` / `_TERMOS_ACAO` (resumo)
+e as frases/gatilhos dentro de `propor_resposta` — sem nenhuma dependência extra.
 
 ## Endpoints da API
 

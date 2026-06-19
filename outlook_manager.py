@@ -10,7 +10,7 @@ Responsabilidades:
     * Varredura periódica do Inbox em uma *background thread*.
     * Filtragem por palavras-chave OU remetentes-chave.
     * Agrupamento de e-mails por tópico (assunto normalizado / ConversationID).
-    * Geração de um resumo curto por tópico (placeholder plugável a um LLM).
+    * Geração de um resumo curto por tópico (sumarização extrativa local).
 
 IMPORTANTE — Concorrência COM no Windows:
     O Outlook é exposto via COM (Component Object Model). Toda thread que
@@ -59,97 +59,112 @@ except Exception:  # ImportError no Mac/Linux, ou ambiente sem Outlook.
 
 
 # ===========================================================================
-# RESUMO AUTOMÁTICO (placeholder)
+# RESUMO AUTOMÁTICO (extrativo, 100% local — sem LLM/chamadas externas)
 # ===========================================================================
+# Stopwords PT-BR mais comuns: ignoradas ao pontuar a relevância das frases.
+_STOPWORDS_PT = {
+    "a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos",
+    "das", "em", "no", "na", "nos", "nas", "por", "para", "pra", "com", "sem",
+    "e", "ou", "mas", "que", "se", "ao", "aos", "à", "às", "é", "ser", "foi",
+    "são", "este", "esta", "isso", "isto", "esse", "essa", "como", "mais",
+    "menos", "já", "não", "sim", "the", "of", "to", "and", "in", "on", "for",
+    "seu", "sua", "seus", "suas", "meu", "minha", "nós", "eu", "ele", "ela",
+    "lhe", "me", "te", "vos", "todo", "toda", "todos", "todas", "muito",
+    "pelo", "pela", "até", "também", "está", "estão", "ter", "tem", "favor",
+}
+
+# Termos que sinalizam ação/urgência: dão um leve "boost" à frase no ranking.
+_TERMOS_ACAO = {
+    "urgente", "prazo", "hoje", "amanha", "amanhã", "confirmar", "confirmação",
+    "aprovar", "aprovação", "pendente", "vencimento", "deadline", "favor",
+    "erro", "bug", "falha", "crítico", "critico", "imediato", "asap",
+    "liquidação", "liquidacao", "settlement", "trade", "registro",
+}
+
+
 def gerar_resumo(texto: str, max_frases: int = 3) -> str:
-    """Gera um resumo curto (2–3 frases) de um corpo de e-mail.
+    """Resume um corpo de e-mail por **sumarização extrativa** (sem LLM).
 
-    Implementação **placeholder** baseada em heurística simples: limpa o
-    texto e devolve as primeiras ``max_frases`` frases relevantes.
+    Estratégia (clássica, determinística e 100% local):
+      1. Limpa o texto (remove cadeias de resposta antigas e assinaturas).
+      2. Quebra em frases.
+      3. Pontua cada frase pela frequência de suas palavras relevantes
+         (ignorando stopwords), normalizada pelo tamanho da frase, com um
+         pequeno bônus para a 1ª frase e para frases com termos de ação.
+      4. Escolhe as ``max_frases`` melhores e as **reordena pela posição
+         original**, para o resumo ler de forma natural.
 
-    >>> PONTO DE EXTENSÃO PARA LLM <<<
-    Para usar uma LLM de verdade (ex.: Claude), substitua o corpo desta
-    função por uma chamada de API. Exemplo com o SDK da Anthropic::
-
-        from anthropic import Anthropic
-        client = Anthropic(api_key="...")
-
-        def gerar_resumo(texto, max_frases=3):
-            msg = client.messages.create(
-                model="claude-opus-4-8",
-                max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        "Resuma o e-mail abaixo em no máximo 3 frases, "
-                        "em português, foco no que requer ação:\\n\\n" + texto
-                    ),
-                }],
-            )
-            return msg.content[0].text.strip()
+    Não faz nenhuma chamada externa — adequado a ambientes corporativos
+    onde LLMs/APIs externas não são permitidas. Nunca lança exceção.
 
     Args:
         texto: Corpo do e-mail (texto puro).
         max_frases: Número máximo de frases no resumo.
 
     Returns:
-        Uma string com o resumo. Nunca lança exceção.
+        Uma string com o resumo.
     """
-    if not texto:
+    if not texto or not texto.strip():
         return "Sem conteúdo para resumir."
 
-    # Normaliza espaços/quebras de linha e remove assinaturas óbvias.
+    # Normaliza espaços/quebras e corta respostas antigas / assinaturas.
     limpo = re.sub(r"\s+", " ", texto).strip()
-    # Corta cadeias de resposta antigas ("De:", "From:", "-----").
-    limpo = re.split(r"(?:^|\s)(?:De:|From:|-{3,}|_{3,})", limpo)[0].strip()
+    limpo = re.split(r"(?:^|\s)(?:De:|From:|Enviada em:|Sent:|-{3,}|_{3,})", limpo)[0].strip()
 
-    # Quebra em frases por pontuação terminal.
-    frases = re.split(r"(?<=[.!?])\s+", limpo)
-    frases = [f.strip() for f in frases if len(f.strip()) > 0]
-
+    frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", limpo) if f.strip()]
     if not frases:
-        return limpo[:200] + ("..." if len(limpo) > 200 else "")
+        return limpo[:300] + ("..." if len(limpo) > 300 else "")
+    if len(frases) <= max_frases:
+        return _limitar(limpo)
 
-    resumo = " ".join(frases[:max_frases])
-    # Garante que não fique gigante mesmo com frases longas.
-    if len(resumo) > 320:
-        resumo = resumo[:317].rstrip() + "..."
-    return resumo
+    # Frequência das palavras relevantes (sobre o texto todo).
+    freq: Dict[str, int] = {}
+    for palavra in re.findall(r"[a-zà-ú0-9]+", _normalizar(limpo)):
+        if len(palavra) <= 2 or palavra in _STOPWORDS_PT:
+            continue
+        freq[palavra] = freq.get(palavra, 0) + 1
+
+    # Pontua cada frase.
+    pontuadas = []
+    for idx, frase in enumerate(frases):
+        palavras = [
+            p for p in re.findall(r"[a-zà-ú0-9]+", _normalizar(frase))
+            if len(p) > 2 and p not in _STOPWORDS_PT
+        ]
+        if not palavras:
+            score = 0.0
+        else:
+            # Soma das frequências, normalizada para não privilegiar frases longas.
+            base = sum(freq.get(p, 0) for p in palavras) / (len(palavras) ** 0.5)
+            bonus_acao = 1.25 if any(p in _TERMOS_ACAO for p in palavras) else 1.0
+            bonus_inicio = 1.15 if idx == 0 else 1.0  # 1ª frase costuma dar o tema
+            score = base * bonus_acao * bonus_inicio
+        pontuadas.append((score, idx, frase))
+
+    # Top-N por score, depois reordena pela posição original (leitura natural).
+    melhores = sorted(pontuadas, key=lambda x: x[0], reverse=True)[:max_frases]
+    melhores.sort(key=lambda x: x[1])
+    return _limitar(" ".join(f for _, _, f in melhores))
+
+
+def _limitar(texto: str, limite: int = 320) -> str:
+    """Corta o texto em ``limite`` caracteres sem quebrar no meio da palavra."""
+    if len(texto) <= limite:
+        return texto
+    corte = texto[:limite].rsplit(" ", 1)[0]
+    return corte.rstrip() + "..."
 
 
 def propor_resposta(assunto: str, historico_texto: str, destinatario: str = "") -> str:
     """Propõe um rascunho de resposta com base no HISTÓRICO COMPLETO do tópico.
 
-    Implementação **placeholder** por heurística: detecta urgência, prazos e
-    perguntas no histórico e monta um rascunho profissional curto em português.
+    Implementação **determinística e 100% local** (sem LLM/chamadas externas,
+    adequada a ambientes corporativos com restrição de API): detecta sinais no
+    histórico — urgência, prazos, perguntas e pedidos de confirmação — e monta
+    um rascunho profissional curto em português, pronto para revisão humana.
 
-    >>> PONTO DE EXTENSÃO PARA LLM <<<
-    Aqui é onde uma LLM brilha (tem o fio completo da conversa como contexto).
-    Exemplo com o SDK da Anthropic (Claude)::
-
-        from anthropic import Anthropic
-        client = Anthropic(api_key="...")
-
-        def propor_resposta(assunto, historico_texto, destinatario=""):
-            msg = client.messages.create(
-                model="claude-opus-4-8",
-                max_tokens=400,
-                system=(
-                    "Você é assistente de um operador de mesa (Traffic Control). "
-                    "Escreva um rascunho de resposta profissional, objetivo e "
-                    "cordial, em português, pronto para revisão humana."
-                ),
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Assunto: {assunto}\\n"
-                        f"Para: {destinatario}\\n\\n"
-                        f"Histórico completo da conversa:\\n{historico_texto}\\n\\n"
-                        "Escreva a melhor resposta possível em 3-5 frases."
-                    ),
-                }],
-            )
-            return msg.content[0].text.strip()
+    Para ajustar o tom/conteúdo, edite as frases de ``linhas`` abaixo e os
+    conjuntos de gatilhos (``urgente``/``tem_prazo``/etc.).
 
     Args:
         assunto: Assunto do tópico.
@@ -810,7 +825,7 @@ class OutlookManager:
         if destaque is None:
             destaque = ultima["remetente_nome"] or ultima["remetente"]
 
-        # Resposta sugerida com base no histórico completo (placeholder/LLM).
+        # Resposta sugerida com base no histórico completo (heurística local).
         resposta_sugerida = propor_resposta(topico["assunto"], corpo_completo, destaque)
 
         return {
