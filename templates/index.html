@@ -220,6 +220,11 @@
       margin-bottom: 3px;
     }
     .bloco-label .bi { color: var(--accent-soft); }
+    .motor-tag {
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em;
+      padding: 1px 6px; border-radius: 5px; text-transform: none;
+    }
+    .motor-tag.gemini { background: rgba(99,102,241,0.14); color: var(--accent); }
 
     /* ---------------- RESPOSTA SUGERIDA ---------------- */
     .resposta-box {
@@ -707,7 +712,10 @@
         <span class="text-secondary small">· ${escapeHtml(participantes)}</span>
       </div>
       <div class="bloco mb-2">
-        <div class="bloco-label"><i class="bi bi-stars"></i> Resumo da conversa</div>
+        <div class="bloco-label">
+          <i class="bi bi-stars"></i> Resumo da conversa
+          ${t.resumo_fonte === "gemini" ? '<span class="motor-tag gemini">Gemini</span>' : ''}
+        </div>
         ${resumoHtml(t)}
       </div>
 

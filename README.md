@@ -86,11 +86,35 @@ Cada varredura **acumula** o histórico de cada tópico em `historico_topicos.js
 - **Resposta sugerida:** gerada a partir do **histórico completo** do tópico e
   exibida em cada card, com botão "Copiar".
 
-## Resumos e respostas — 100% local (sem LLM)
+## Resumos e respostas
 
-Por restrição corporativa (DLP/compliance), **não há chamadas a APIs externas
-de LLM**. Todo o processamento de texto roda na própria máquina, de forma
-determinística, em `outlook_manager.py`:
+Por padrão é **100% local** (determinístico, nada sai da máquina). Há um backend
+**opcional** de LLM (Gemini) que, se configurado, melhora o resumo/resposta — e
+cai automaticamente no local em qualquer erro.
+
+### Backend opcional Gemini (`genai_backend.py`)
+
+Desligado por padrão. Só ativa se houver credenciais no ambiente — sem isso,
+nada é enviado para fora. ⚠️ **Em ambiente corporativo, valide com TI/Compliance
+antes de ativar** (envia conteúdo de e-mail para o Google). Use de preferência
+**Vertex AI** num projeto GCP aprovado.
+
+```bat
+:: Opção A — Gemini API por chave
+set GOOGLE_API_KEY=...
+:: Opção B — Vertex AI (projeto corporativo aprovado)
+set GOOGLE_GENAI_USE_VERTEXAI=1
+set GOOGLE_CLOUD_PROJECT=seu-projeto
+set GOOGLE_CLOUD_LOCATION=us-central1
+:: desligar à força: set TC_USE_GENAI=0   |   trocar modelo: set TC_GENAI_MODEL=...
+```
+
+Quando ativo, o card mostra um selo **Gemini**; senão, usa o resumo local. A LLM
+só é chamada quando há mensagem nova no tópico (cache por nº de mensagens).
+
+### Processamento local (padrão e fallback)
+
+Roda na própria máquina, de forma determinística, em `outlook_manager.py`:
 
 - `gerar_resumo(texto)` — **sumarização extrativa**: pontua cada frase pela
   frequência de palavras relevantes (descartando stopwords PT-BR), com bônus

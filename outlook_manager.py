@@ -37,6 +37,8 @@ import unicodedata
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import genai_backend  # backend opcional Gemini (desligado se sem credenciais)
+
 # Arquivos de persistência (mesmo diretório do módulo).
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
@@ -892,8 +894,23 @@ class OutlookManager:
             })
 
         # Ordena cronologicamente e resume a CHAIN COMPLETA em bullets.
+        # Recalcula só quando o nº de mensagens muda (cache) — evita refazer o
+        # resumo (e chamar a LLM) a cada poll quando nada mudou.
         registro["mensagens"].sort(key=lambda m: m["recebido"])
-        bullets = gerar_resumo_chain(registro["mensagens"])
+        n = len(registro["mensagens"])
+        if n != registro.get("_resumo_n", -1) or "_resumo_bullets" not in registro:
+            bullets = None
+            fonte = "local"
+            if genai_backend.ativo():
+                bullets = genai_backend.resumir_chain(registro["mensagens"])
+                if bullets:
+                    fonte = "gemini"
+            if not bullets:  # indisponível ou erro -> fallback local
+                bullets = gerar_resumo_chain(registro["mensagens"])
+            registro["_resumo_bullets"] = bullets
+            registro["_resumo_fonte"] = fonte
+            registro["_resumo_n"] = n
+        bullets = registro["_resumo_bullets"]
         resumo_str = _bullets_para_texto(bullets)
 
         # Snapshot só quando muda (evita inflar o trail a cada poll).
@@ -930,8 +947,18 @@ class OutlookManager:
         if destaque is None:
             destaque = ultima["remetente_nome"] or ultima["remetente"]
 
-        # Resposta sugerida com base no histórico completo (heurística local).
-        resposta_sugerida = propor_resposta(topico["assunto"], corpo_completo, destaque)
+        # Resposta sugerida (Gemini se ativo, senão heurística local), com cache
+        # por nº de mensagens para não recomputar/chamar a LLM a cada poll.
+        n = len(registro["mensagens"])
+        if n != registro.get("_resp_n", -1) or "_resp" not in registro:
+            resp = None
+            if genai_backend.ativo():
+                resp = genai_backend.propor_resposta(topico["assunto"], corpo_completo, destaque)
+            if not resp:
+                resp = propor_resposta(topico["assunto"], corpo_completo, destaque)
+            registro["_resp"] = resp
+            registro["_resp_n"] = n
+        resposta_sugerida = registro["_resp"]
 
         return {
             "chave": topico["chave"],
@@ -941,6 +968,7 @@ class OutlookManager:
             "qtd_mensagens": len(registro["mensagens"]),  # total acumulado
             "resumo": resumo,                  # texto (fallback / dedup)
             "resumo_bullets": resumo_bullets,  # [{autor, ponto}] da chain
+            "resumo_fonte": registro.get("_resumo_fonte", "local"),  # gemini|local
             "resposta_sugerida": resposta_sugerida,
             "historico_resumos": registro["resumos"][-5:],  # últimos snapshots
             "qtd_resumos": len(registro["resumos"]),
