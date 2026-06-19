@@ -189,6 +189,14 @@
       color: var(--bs-secondary-color);
     }
     .resumo .bi-stars { color: var(--accent-soft); }
+    .resumo-lista {
+      margin: 0; padding-left: 18px;
+      font-size: 0.85rem; line-height: 1.5;
+      color: var(--bs-secondary-color);
+    }
+    .resumo-lista li { margin-bottom: 3px; }
+    .resumo-lista li::marker { color: var(--accent-soft); }
+    .resumo-lista strong { color: var(--bs-body-color); font-weight: 600; }
     .motivo-tag {
       font-size: 0.7rem; font-weight: 500;
       padding: 3px 8px; border-radius: 6px;
@@ -700,7 +708,7 @@
       </div>
       <div class="bloco mb-2">
         <div class="bloco-label"><i class="bi bi-stars"></i> Resumo da conversa</div>
-        <p class="resumo mb-0">${escapeHtml(t.resumo || "—")}</p>
+        ${resumoHtml(t)}
       </div>
 
       ${respostaHtml(t)}
@@ -710,6 +718,18 @@
         <div class="d-flex flex-wrap gap-1">${motivos}</div>
         <small class="text-secondary"><i class="bi bi-clock me-1"></i>${escapeHtml(t.ultima_atualizacao)}</small>
       </div>`;
+  }
+
+  // Resumo da chain em bullets (um ponto por mensagem). Fallback: texto.
+  function resumoHtml(t) {
+    const bullets = t.resumo_bullets;
+    if (Array.isArray(bullets) && bullets.length) {
+      const itens = bullets.map(b => `
+        <li>${b.autor ? `<strong>${escapeHtml(b.autor)}:</strong> ` : ""}${escapeHtml(b.ponto)}</li>`
+      ).join("");
+      return `<ul class="resumo-lista">${itens}</ul>`;
+    }
+    return `<p class="resumo mb-0">${escapeHtml(t.resumo || "—")}</p>`;
   }
 
   // Bloco "Resposta sugerida" com botão de copiar.

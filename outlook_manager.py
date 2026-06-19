@@ -82,49 +82,35 @@ _TERMOS_ACAO = {
 }
 
 
-def gerar_resumo(texto: str, max_frases: int = 3) -> str:
-    """Resume um corpo de e-mail por **sumarização extrativa** (sem LLM).
+def _limpar_corpo(texto: str) -> str:
+    """Normaliza espaços e corta cadeias de resposta antigas / assinaturas."""
+    limpo = re.sub(r"\s+", " ", texto or "").strip()
+    return re.split(
+        r"(?:^|\s)(?:De:|From:|Enviada em:|Sent:|-{3,}|_{3,})", limpo
+    )[0].strip()
 
-    Estratégia (clássica, determinística e 100% local):
-      1. Limpa o texto (remove cadeias de resposta antigas e assinaturas).
-      2. Quebra em frases.
-      3. Pontua cada frase pela frequência de suas palavras relevantes
-         (ignorando stopwords), normalizada pelo tamanho da frase, com um
-         pequeno bônus para a 1ª frase e para frases com termos de ação.
-      4. Escolhe as ``max_frases`` melhores e as **reordena pela posição
-         original**, para o resumo ler de forma natural.
 
-    Não faz nenhuma chamada externa — adequado a ambientes corporativos
-    onde LLMs/APIs externas não são permitidas. Nunca lança exceção.
+def _top_frases(texto: str, n: int) -> List[str]:
+    """Retorna as ``n`` frases mais relevantes de um texto, em ordem original.
 
-    Args:
-        texto: Corpo do e-mail (texto puro).
-        max_frases: Número máximo de frases no resumo.
-
-    Returns:
-        Uma string com o resumo.
+    Sumarização extrativa determinística (sem LLM): pontua cada frase pela
+    frequência das palavras relevantes (sem stopwords), normalizada pelo
+    tamanho, com bônus para a 1ª frase e para frases com termos de ação.
     """
-    if not texto or not texto.strip():
-        return "Sem conteúdo para resumir."
-
-    # Normaliza espaços/quebras e corta respostas antigas / assinaturas.
-    limpo = re.sub(r"\s+", " ", texto).strip()
-    limpo = re.split(r"(?:^|\s)(?:De:|From:|Enviada em:|Sent:|-{3,}|_{3,})", limpo)[0].strip()
+    limpo = _limpar_corpo(texto)
+    if not limpo:
+        return []
 
     frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", limpo) if f.strip()]
-    if not frases:
-        return limpo[:300] + ("..." if len(limpo) > 300 else "")
-    if len(frases) <= max_frases:
-        return _limitar(limpo)
+    if len(frases) <= n:
+        return frases
 
-    # Frequência das palavras relevantes (sobre o texto todo).
     freq: Dict[str, int] = {}
     for palavra in re.findall(r"[a-zà-ú0-9]+", _normalizar(limpo)):
         if len(palavra) <= 2 or palavra in _STOPWORDS_PT:
             continue
         freq[palavra] = freq.get(palavra, 0) + 1
 
-    # Pontua cada frase.
     pontuadas = []
     for idx, frase in enumerate(frases):
         palavras = [
@@ -134,17 +120,73 @@ def gerar_resumo(texto: str, max_frases: int = 3) -> str:
         if not palavras:
             score = 0.0
         else:
-            # Soma das frequências, normalizada para não privilegiar frases longas.
             base = sum(freq.get(p, 0) for p in palavras) / (len(palavras) ** 0.5)
             bonus_acao = 1.25 if any(p in _TERMOS_ACAO for p in palavras) else 1.0
-            bonus_inicio = 1.15 if idx == 0 else 1.0  # 1ª frase costuma dar o tema
+            bonus_inicio = 1.15 if idx == 0 else 1.0
             score = base * bonus_acao * bonus_inicio
         pontuadas.append((score, idx, frase))
 
-    # Top-N por score, depois reordena pela posição original (leitura natural).
-    melhores = sorted(pontuadas, key=lambda x: x[0], reverse=True)[:max_frases]
+    melhores = sorted(pontuadas, key=lambda x: x[0], reverse=True)[:n]
     melhores.sort(key=lambda x: x[1])
-    return _limitar(" ".join(f for _, _, f in melhores))
+    return [f for _, _, f in melhores]
+
+
+def gerar_resumo(texto: str, max_frases: int = 3) -> str:
+    """Resume um texto único por sumarização extrativa (string). Sem LLM."""
+    if not texto or not texto.strip():
+        return "Sem conteúdo para resumir."
+    frases = _top_frases(texto, max_frases)
+    if not frases:
+        return _limitar(_limpar_corpo(texto))
+    return _limitar(" ".join(frases))
+
+
+def gerar_resumo_chain(mensagens: List[Dict[str, Any]], max_msgs: int = 10) -> List[Dict[str, str]]:
+    """Resume a CHAIN inteira em bullets: um ponto-chave por mensagem.
+
+    Em vez de um preview do último e-mail, percorre TODAS as mensagens do
+    tópico (em ordem cronológica) e extrai o ponto principal de cada uma —
+    ``[{"autor": "Maria", "ponto": "..."}, ...]`` — pronto para virar uma
+    lista de bullets no painel. 100% local, determinístico, sem LLM.
+
+    Args:
+        mensagens: Lista de mensagens do histórico (cada uma com
+            ``remetente_nome``/``remetente`` e ``corpo``), já cronológica.
+        max_msgs: Limite de bullets; se a chain for maior, as mais antigas
+            são condensadas em um bullet de contagem.
+
+    Returns:
+        Lista de dicts ``{"autor", "ponto"}``. Nunca lança exceção.
+    """
+    if not mensagens:
+        return []
+
+    bullets: List[Dict[str, str]] = []
+    visiveis = mensagens[-max_msgs:]
+    omitidas = len(mensagens) - len(visiveis)
+    if omitidas > 0:
+        bullets.append({
+            "autor": "",
+            "ponto": f"(+{omitidas} mensagem(ns) anterior(es) no histórico)",
+        })
+
+    for m in visiveis:
+        nome = (m.get("remetente_nome") or m.get("remetente") or "").strip()
+        autor = nome.split(" ")[0] if nome else ""
+        frases = _top_frases(m.get("corpo", ""), 1)
+        ponto = _limitar(frases[0], 220) if frases else "(sem texto legível)"
+        bullets.append({"autor": autor, "ponto": ponto})
+
+    return bullets
+
+
+def _bullets_para_texto(bullets: List[Dict[str, str]]) -> str:
+    """Serializa os bullets em texto (usado no trail de resumos e no dedup)."""
+    linhas = []
+    for b in bullets:
+        prefixo = f"{b['autor']}: " if b.get("autor") else ""
+        linhas.append(f"• {prefixo}{b['ponto']}")
+    return "\n".join(linhas)
 
 
 def _limitar(texto: str, limite: int = 320) -> str:
@@ -819,11 +861,12 @@ class OutlookManager:
         iso = recebido.isoformat() if hasattr(recebido, "isoformat") else str(recebido)
         return f"{_normalizar(email['remetente'])}|{iso}|{len(email.get('corpo',''))}"
 
-    def _atualizar_historico(self, topico: Dict[str, Any]) -> Dict[str, Any]:
-        """Funde as mensagens do tópico no histórico persistente e o devolve.
+    def _atualizar_historico(self, topico: Dict[str, Any]):
+        """Funde as mensagens do tópico no histórico e devolve (registro, bullets).
 
         - Acrescenta apenas mensagens inéditas (dedup por assinatura).
-        - Acrescenta um snapshot de resumo (com data) quando ele MUDA.
+        - Resume a CHAIN inteira em bullets (um ponto por mensagem) e grava um
+          snapshot do resumo (com data) quando ele MUDA.
         Roda apenas na thread do worker (sem necessidade de lock no histórico).
         """
         chave = topico["chave"]
@@ -848,31 +891,31 @@ class OutlookManager:
                 "corpo": email["corpo"],
             })
 
-        # Ordena cronologicamente e gera o resumo do HISTÓRICO COMPLETO.
+        # Ordena cronologicamente e resume a CHAIN COMPLETA em bullets.
         registro["mensagens"].sort(key=lambda m: m["recebido"])
-        corpo_completo = "\n\n".join(m["corpo"] for m in registro["mensagens"])
-        resumo_atual = gerar_resumo(corpo_completo)
+        bullets = gerar_resumo_chain(registro["mensagens"])
+        resumo_str = _bullets_para_texto(bullets)
 
-        # Snapshot de resumo só quando muda (evita inflar o trail a cada poll).
-        if not registro["resumos"] or registro["resumos"][-1]["resumo"] != resumo_atual:
+        # Snapshot só quando muda (evita inflar o trail a cada poll).
+        if not registro["resumos"] or registro["resumos"][-1]["resumo"] != resumo_str:
             registro["resumos"].append({
                 "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "resumo": resumo_atual,
+                "resumo": resumo_str,
             })
 
-        return registro
+        return registro, bullets
 
     def _montar_topico(self, topico: Dict[str, Any]) -> Dict[str, Any]:
         """Constrói o dict final de um tópico (pronto para virar JSON).
 
         Usa o HISTÓRICO COMPLETO acumulado (não só a varredura atual) para o
-        resumo e para a resposta sugerida.
+        resumo (em bullets) e para a resposta sugerida.
         """
         mensagens = sorted(topico["mensagens"], key=lambda m: m["recebido"])
         ultima = mensagens[-1]
 
-        # Funde no histórico e obtém resumo acumulado + trail.
-        registro = self._atualizar_historico(topico)
+        # Funde no histórico e obtém o resumo da chain (bullets) + trail.
+        registro, resumo_bullets = self._atualizar_historico(topico)
         resumo = registro["resumos"][-1]["resumo"]
         corpo_completo = "\n\n".join(m["corpo"] for m in registro["mensagens"])
 
@@ -896,7 +939,8 @@ class OutlookManager:
             "pessoa_destaque": destaque,
             "participantes": sorted(topico["pessoas"]),
             "qtd_mensagens": len(registro["mensagens"]),  # total acumulado
-            "resumo": resumo,
+            "resumo": resumo,                  # texto (fallback / dedup)
+            "resumo_bullets": resumo_bullets,  # [{autor, ponto}] da chain
             "resposta_sugerida": resposta_sugerida,
             "historico_resumos": registro["resumos"][-5:],  # últimos snapshots
             "qtd_resumos": len(registro["resumos"]),
