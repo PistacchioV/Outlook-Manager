@@ -585,15 +585,22 @@
   function renderStatus(data) {
     const dot = document.getElementById("status-dot");
     const text = document.getElementById("status-text");
+    const sw = data.status_worker || "";
     if (data.modo_simulado) {
       dot.className = "status-dot dot-warn";
       text.textContent = "Modo simulado";
-    } else if ((data.status_worker || "").startsWith("rodando")) {
+    } else if (sw.startsWith("rodando")) {
       dot.className = "status-dot dot-ok";
       text.textContent = "Outlook conectado";
+    } else if (sw === "iniciando") {
+      dot.className = "status-dot dot-warn";
+      text.textContent = "Iniciando…";
+    } else if (sw === "parado") {
+      dot.className = "status-dot dot-err";
+      text.textContent = "Worker parado";
     } else {
       dot.className = "status-dot dot-err";
-      text.textContent = (data.status_worker || "erro").slice(0, 40);
+      text.textContent = sw.slice(0, 60) || "erro";
     }
     document.getElementById("info-varredura").textContent =
       data.ultima_varredura ? `Última varredura · ${data.ultima_varredura}` : "";
@@ -606,15 +613,30 @@
     const el = document.getElementById("conta-status");
     const conectada = data.conta_conectada;
     const configurada = (data.conta_email || "").trim();
+    const sw = data.status_worker || "";
 
-    // Erro na varredura (ex.: conta não encontrada / Novo Outlook).
-    if ((data.status_worker || "").startsWith("erro")) {
+    // Erro na varredura — mostra a mensagem REAL (conta não encontrada,
+    // Novo Outlook, COM bloqueado, etc.) para guiar a correção.
+    if (sw.startsWith("erro")) {
       el.className = "conta-status err";
       el.innerHTML = `<i class="bi bi-exclamation-octagon-fill"></i>
-        <span>Não conectado — verifique a conta no Outlook</span>`;
+        <span>${escapeHtml(sw.replace(/^erro:\s*/, ""))}</span>`;
       return;
     }
-    // Ainda não confirmou nenhuma caixa.
+    // Worker não está rodando (não foi iniciado / foi parado).
+    if (sw === "parado") {
+      el.className = "conta-status err";
+      el.innerHTML = `<i class="bi bi-stop-circle-fill"></i>
+        <span>Worker parado — reinicie com <span class="mono">python app.py</span></span>`;
+      return;
+    }
+    if (sw === "iniciando") {
+      el.className = "conta-status wait";
+      el.innerHTML = `<i class="bi bi-hourglass-split"></i>
+        <span>Iniciando o worker…</span>`;
+      return;
+    }
+    // Rodando, mas ainda não confirmou nenhuma caixa.
     if (!conectada) {
       el.className = "conta-status wait";
       el.innerHTML = `<i class="bi bi-hourglass-split"></i>

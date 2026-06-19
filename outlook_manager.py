@@ -449,11 +449,22 @@ class OutlookManager:
         Windows) e o libera ao sair. Entre varreduras, dorme em fatias
         para responder rápido a pedidos de parada / varredura forçada.
         """
-        if not MODO_SIMULADO:
-            pythoncom.CoInitialize()  # <-- obrigatório por thread (COM)
+        self.status_worker = "iniciando"
+        com_iniciado = False
 
-        self.status_worker = "rodando"
+        # Inicializa o COM desta thread (obrigatório no Windows). Falha aqui
+        # precisa ficar VISÍVEL no painel — não pode virar um "parado" mudo.
+        if not MODO_SIMULADO:
+            try:
+                pythoncom.CoInitialize()
+                com_iniciado = True
+            except Exception as exc:  # noqa: BLE001
+                self.status_worker = f"erro: falha ao iniciar COM (CoInitialize): {exc}"
+                return
+
         try:
+            self.status_worker = "rodando"
+
             # Primeira varredura imediata ao iniciar.
             self._executar_varredura_segura()
 
@@ -473,10 +484,18 @@ class OutlookManager:
                     break
 
                 self._executar_varredura_segura()
+        except Exception as exc:  # noqa: BLE001  (thread não pode morrer calada)
+            self.status_worker = f"erro: worker interrompido: {exc}"
         finally:
-            self.status_worker = "parado"
-            if not MODO_SIMULADO:
-                pythoncom.CoUninitialize()  # <-- libera o COM da thread
+            # Só marca "parado" se a parada foi solicitada; caso contrário,
+            # preserva a mensagem de erro para aparecer no painel.
+            if self._stop_event.is_set():
+                self.status_worker = "parado"
+            if com_iniciado:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
     def _executar_varredura_segura(self) -> None:
         """Envolve a varredura em try/except para o loop nunca morrer."""

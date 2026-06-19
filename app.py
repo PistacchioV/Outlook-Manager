@@ -33,6 +33,12 @@ app = Flask(__name__)
 # Instância única do gerenciador (worker varre a cada 5 min por padrão).
 manager = OutlookManager(intervalo_segundos=300)
 
+# Sobe a thread de varredura JÁ NA IMPORTAÇÃO do módulo — assim o worker roda
+# independentemente de como o app é iniciado (python app.py, flask run, um
+# servidor WSGI como o waitress, ou o "Run" de uma IDE). iniciar_worker() é
+# idempotente, então chamar de novo em main() não cria thread duplicada.
+manager.iniciar_worker()
+
 
 # ---------------------------------------------------------------------------
 # Página principal
