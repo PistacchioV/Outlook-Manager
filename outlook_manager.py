@@ -166,6 +166,9 @@ class OutlookManager:
         self._topicos: Dict[str, Dict[str, Any]] = {}
         self.ultima_varredura: Optional[str] = None
         self.status_worker: str = "parado"
+        # Conta que o Outlook REALMENTE reconheceu na última varredura
+        # bem-sucedida (None enquanto não conectou / em erro).
+        self.conta_conectada: Optional[str] = None
 
         # ----- Concorrência -----
         self._lock = threading.Lock()
@@ -287,6 +290,8 @@ class OutlookManager:
                 "ultima_varredura": self.ultima_varredura,
                 "status_worker": self.status_worker,
                 "modo_simulado": MODO_SIMULADO,
+                "conta_email": self.conta_email,        # conta configurada
+                "conta_conectada": self.conta_conectada,  # conta reconhecida
             }
 
     # ----------------------------------------------------------------- #
@@ -358,12 +363,15 @@ class OutlookManager:
         try:
             if MODO_SIMULADO:
                 emails = self._coletar_emails_simulados()
+                # No simulado, "confirmamos" a conta configurada.
+                self.conta_conectada = self.conta_email or "conta padrão (simulado)"
             else:
                 emails = self._coletar_emails_outlook()
             self._processar_emails(emails)
             self.ultima_varredura = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         except Exception as exc:  # noqa: BLE001  (logamos e seguimos)
             self.status_worker = f"erro: {exc}"
+            self.conta_conectada = None  # não confirmamos a caixa
 
     # ----------------------------------------------------------------- #
     # Coleta — Outlook real                                             #
@@ -438,7 +446,13 @@ class OutlookManager:
 
         # 6 == olFolderInbox (constante padrão do Outlook).
         if not alvo:
-            return namespace.GetDefaultFolder(6)
+            inbox = namespace.GetDefaultFolder(6)
+            # Registra o nome real da store conectada (conta padrão).
+            try:
+                self.conta_conectada = inbox.Store.DisplayName or "conta padrão"
+            except Exception:
+                self.conta_conectada = "conta padrão"
+            return inbox
 
         # 1) Por Account (forma mais robusta).
         try:
@@ -446,6 +460,7 @@ class OutlookManager:
                 smtp = _normalizar(getattr(account, "SmtpAddress", "") or "")
                 if smtp == alvo:
                     store = account.DeliveryStore
+                    self.conta_conectada = account.SmtpAddress  # conta confirmada
                     return store.GetDefaultFolder(6)
         except Exception:
             pass
@@ -455,6 +470,7 @@ class OutlookManager:
             for store in namespace.Stores:
                 nome = _normalizar(getattr(store, "DisplayName", "") or "")
                 if alvo in nome:
+                    self.conta_conectada = store.DisplayName  # conta confirmada
                     return store.GetDefaultFolder(6)
         except Exception:
             pass

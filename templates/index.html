@@ -237,6 +237,26 @@
       color: var(--bs-secondary-color); font-style: italic;
     }
 
+    /* Confirmação da conta reconhecida pelo Outlook. */
+    .conta-status {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 0.78rem; font-weight: 500;
+      padding: 7px 11px; border-radius: var(--radius-sm);
+      border: 1px solid var(--card-border);
+      /* Entra suave quando o estado muda. */
+      transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease;
+    }
+    .conta-status:empty { display: none; }
+    .conta-status .bi { font-size: 0.95rem; }
+    .conta-status.ok   { background: rgba(16,185,129,0.10); color: #059669; border-color: rgba(16,185,129,0.25); }
+    [data-bs-theme="dark"] .conta-status.ok { color: #34d399; }
+    .conta-status.wait { background: rgba(120,120,140,0.10); color: var(--bs-secondary-color); }
+    .conta-status.warn { background: rgba(245,158,11,0.10); color: #b45309; border-color: rgba(245,158,11,0.28); }
+    [data-bs-theme="dark"] .conta-status.warn { color: #fbbf24; }
+    .conta-status.err  { background: rgba(239,68,68,0.10); color: #dc2626; border-color: rgba(239,68,68,0.28); }
+    [data-bs-theme="dark"] .conta-status.err { color: #f87171; }
+    .conta-status .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 600; }
+
     /* ---------------- ACESSIBILIDADE ----------------
        Reduz movimento: mantém opacidade/cor, remove deslocamentos. */
     @media (prefers-reduced-motion: reduce) {
@@ -289,7 +309,8 @@
               <input id="input-conta" type="email" class="form-control" placeholder="usuario@jpmorgan.com" autocomplete="off" />
               <button class="btn btn-primary" type="submit" aria-label="Salvar conta"><i class="bi bi-check-lg"></i></button>
             </form>
-            <small class="text-secondary">Mailbox do Outlook que será lida. Vazio = conta padrão.</small>
+            <small class="text-secondary d-block mt-1">Mailbox do Outlook que será lida. Vazio = conta padrão.</small>
+            <div id="conta-status" class="conta-status mt-2"></div>
           </div>
         </div>
 
@@ -500,6 +521,44 @@
     }
     document.getElementById("info-varredura").textContent =
       data.ultima_varredura ? `Última varredura · ${data.ultima_varredura}` : "";
+
+    renderContaStatus(data);
+  }
+
+  // Confirma se o Outlook reconheceu a caixa configurada na última varredura.
+  function renderContaStatus(data) {
+    const el = document.getElementById("conta-status");
+    const conectada = data.conta_conectada;
+    const configurada = (data.conta_email || "").trim();
+
+    // Erro na varredura (ex.: conta não encontrada / Novo Outlook).
+    if ((data.status_worker || "").startsWith("erro")) {
+      el.className = "conta-status err";
+      el.innerHTML = `<i class="bi bi-exclamation-octagon-fill"></i>
+        <span>Não conectado — verifique a conta no Outlook</span>`;
+      return;
+    }
+    // Ainda não confirmou nenhuma caixa.
+    if (!conectada) {
+      el.className = "conta-status wait";
+      el.innerHTML = `<i class="bi bi-hourglass-split"></i>
+        <span>Aguardando confirmação da caixa…</span>`;
+      return;
+    }
+    // Conectado, mas a caixa reconhecida difere da configurada → aviso.
+    const bate = !configurada ||
+                 conectada.toLowerCase().includes(configurada.toLowerCase()) ||
+                 configurada.toLowerCase().includes(conectada.toLowerCase());
+    if (!bate) {
+      el.className = "conta-status warn";
+      el.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i>
+        <span>Lendo <span class="mono">${escapeHtml(conectada)}</span> (≠ configurada)</span>`;
+      return;
+    }
+    // OK: caixa reconhecida e batendo com a configurada.
+    el.className = "conta-status ok";
+    el.innerHTML = `<i class="bi bi-check-circle-fill"></i>
+      <span>Conectado a <span class="mono">${escapeHtml(conectada)}</span></span>`;
   }
 
   // =====================================================================
