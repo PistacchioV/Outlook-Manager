@@ -37,8 +37,12 @@ import unicodedata
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-# Arquivo de persistência da configuração (mesmo diretório do módulo).
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+# Arquivos de persistência (mesmo diretório do módulo).
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
+# Histórico acumulado de cada tópico (mensagens únicas + trail de resumos).
+# Contém corpo de e-mails — NÃO versionar (está no .gitignore).
+_HISTORICO_PATH = os.path.join(_BASE_DIR, "historico_topicos.json")
 
 # ---------------------------------------------------------------------------
 # Import condicional do pywin32. Fora do Windows caímos em MODO_SIMULADO.
@@ -113,6 +117,79 @@ def gerar_resumo(texto: str, max_frases: int = 3) -> str:
     return resumo
 
 
+def propor_resposta(assunto: str, historico_texto: str, destinatario: str = "") -> str:
+    """Propõe um rascunho de resposta com base no HISTÓRICO COMPLETO do tópico.
+
+    Implementação **placeholder** por heurística: detecta urgência, prazos e
+    perguntas no histórico e monta um rascunho profissional curto em português.
+
+    >>> PONTO DE EXTENSÃO PARA LLM <<<
+    Aqui é onde uma LLM brilha (tem o fio completo da conversa como contexto).
+    Exemplo com o SDK da Anthropic (Claude)::
+
+        from anthropic import Anthropic
+        client = Anthropic(api_key="...")
+
+        def propor_resposta(assunto, historico_texto, destinatario=""):
+            msg = client.messages.create(
+                model="claude-opus-4-8",
+                max_tokens=400,
+                system=(
+                    "Você é assistente de um operador de mesa (Traffic Control). "
+                    "Escreva um rascunho de resposta profissional, objetivo e "
+                    "cordial, em português, pronto para revisão humana."
+                ),
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Assunto: {assunto}\\n"
+                        f"Para: {destinatario}\\n\\n"
+                        f"Histórico completo da conversa:\\n{historico_texto}\\n\\n"
+                        "Escreva a melhor resposta possível em 3-5 frases."
+                    ),
+                }],
+            )
+            return msg.content[0].text.strip()
+
+    Args:
+        assunto: Assunto do tópico.
+        historico_texto: Concatenação de TODAS as mensagens do tópico.
+        destinatario: Nome da pessoa-chave (saudação personalizada).
+
+    Returns:
+        Rascunho de resposta. Nunca lança exceção.
+    """
+    texto = _normalizar(historico_texto)
+    primeiro_nome = (destinatario or "").strip().split(" ")[0] or "tudo bem"
+    saudacao = f"Olá {primeiro_nome}," if destinatario else "Olá,"
+
+    # Sinais detectados no histórico.
+    urgente = any(p in texto for p in ("urgente", "asap", "imediato", "hoje ainda", "o quanto antes"))
+    tem_prazo = any(p in texto for p in ("prazo", "ate sexta", "ate amanha", "vencimento", "deadline", "ate o fim"))
+    tem_pergunta = "?" in historico_texto or any(
+        p in texto for p in ("voce pode", "poderia", "consegue", "pode confirmar", "qual ", "quando ")
+    )
+    pede_confirmacao = any(p in texto for p in ("confirmar", "confirma", "de acordo", "aprovar", "aprovacao"))
+
+    linhas = [saudacao, ""]
+    linhas.append(f"Obrigado pelo retorno sobre \"{assunto.strip()}\".")
+
+    if urgente:
+        linhas.append("Entendi a urgência e já estou priorizando este ponto.")
+    if tem_pergunta:
+        linhas.append("Sobre os pontos levantados, vou verificar internamente e retorno com os detalhes.")
+    if pede_confirmacao:
+        linhas.append("Assim que validar, envio a confirmação formal.")
+    if tem_prazo:
+        linhas.append("Estou atento ao prazo mencionado e darei retorno dentro dele.")
+    if not (urgente or tem_pergunta or pede_confirmacao or tem_prazo):
+        linhas.append("Fico à disposição para seguir com os próximos passos.")
+
+    linhas.append("")
+    linhas.append("Atenciosamente,")
+    return "\n".join(linhas)
+
+
 # ===========================================================================
 # UTILITÁRIOS
 # ===========================================================================
@@ -170,6 +247,13 @@ class OutlookManager:
         # bem-sucedida (None enquanto não conectou / em erro).
         self.conta_conectada: Optional[str] = None
 
+        # Histórico acumulado por tópico: chave -> {assunto, mensagens, resumos}.
+        # Persiste em disco e é manipulado apenas na thread do worker.
+        self._historico: Dict[str, Dict[str, Any]] = {}
+        # Instante-base fixo para o modo simulado (timestamps estáveis entre
+        # varreduras, para o dedup do histórico funcionar como no Outlook real).
+        self._sim_base = datetime.now()
+
         # ----- Concorrência -----
         self._lock = threading.Lock()
         self._stop_event = threading.Event()       # sinaliza parada do worker
@@ -177,8 +261,9 @@ class OutlookManager:
         self._thread: Optional[threading.Thread] = None
 
         # ----- Persistência -----
-        # Carrega config.json se existir (sobrescreve os defaults acima).
+        # Carrega config.json e o histórico (se existirem).
         self._carregar_config()
+        self._carregar_historico()
 
     # ----------------------------------------------------------------- #
     # Persistência da configuração                                       #
@@ -217,6 +302,26 @@ class OutlookManager:
             os.replace(tmp, _CONFIG_PATH)  # troca atômica (evita arquivo parcial)
         except Exception:
             pass  # falha ao persistir não deve derrubar a aplicação
+
+    def _carregar_historico(self) -> None:
+        """Carrega o histórico de tópicos do disco (se existir)."""
+        try:
+            with open(_HISTORICO_PATH, "r", encoding="utf-8") as fp:
+                self._historico = json.load(fp)
+        except FileNotFoundError:
+            self._historico = {}
+        except Exception:
+            self._historico = {}  # histórico corrompido não impede o boot
+
+    def _salvar_historico(self) -> None:
+        """Grava o histórico em disco (escrita atômica)."""
+        try:
+            tmp = _HISTORICO_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fp:
+                json.dump(self._historico, fp, ensure_ascii=False, indent=2)
+            os.replace(tmp, _HISTORICO_PATH)
+        except Exception:
+            pass
 
     # ----------------------------------------------------------------- #
     # API de configuração (chamada pelas rotas Flask)                    #
@@ -519,7 +624,7 @@ class OutlookManager:
     # ----------------------------------------------------------------- #
     def _coletar_emails_simulados(self) -> List[Dict[str, Any]]:
         """Gera e-mails fictícios para desenvolver a UI sem Outlook."""
-        agora = datetime.now()
+        agora = self._sim_base  # base fixa: timestamps estáveis entre varreduras
         return [
             {
                 "assunto": "RE: Bug no login do portal",
@@ -619,22 +724,80 @@ class OutlookManager:
             topico["pessoas"].add(email["remetente_nome"] or email["remetente"])
             topico["motivos"].add(motivo)
 
-        # Monta a estrutura final serializável (resumo + metadados).
+        # Monta a estrutura final serializável (resumo + resposta + metadados).
         finais: Dict[str, Dict[str, Any]] = {}
         for chave, topico in novos_topicos.items():
             finais[chave] = self._montar_topico(topico)
 
+        # Persiste o histórico atualizado (resumos acumulados + mensagens).
+        self._salvar_historico()
+
         with self._lock:
             self._topicos = finais
 
+    @staticmethod
+    def _assinatura_msg(email: Dict[str, Any]) -> str:
+        """Identidade estável de uma mensagem, para dedup no histórico."""
+        recebido = email["recebido"]
+        iso = recebido.isoformat() if hasattr(recebido, "isoformat") else str(recebido)
+        return f"{_normalizar(email['remetente'])}|{iso}|{len(email.get('corpo',''))}"
+
+    def _atualizar_historico(self, topico: Dict[str, Any]) -> Dict[str, Any]:
+        """Funde as mensagens do tópico no histórico persistente e o devolve.
+
+        - Acrescenta apenas mensagens inéditas (dedup por assinatura).
+        - Acrescenta um snapshot de resumo (com data) quando ele MUDA.
+        Roda apenas na thread do worker (sem necessidade de lock no histórico).
+        """
+        chave = topico["chave"]
+        registro = self._historico.get(chave)
+        if registro is None:
+            registro = {"assunto": topico["assunto"], "mensagens": [], "resumos": []}
+            self._historico[chave] = registro
+
+        registro["assunto"] = topico["assunto"]  # mantém o assunto mais recente
+        vistas = {m["assinatura"] for m in registro["mensagens"]}
+
+        for email in sorted(topico["mensagens"], key=lambda m: m["recebido"]):
+            sig = self._assinatura_msg(email)
+            if sig in vistas:
+                continue
+            vistas.add(sig)
+            registro["mensagens"].append({
+                "assinatura": sig,
+                "remetente": email["remetente"],
+                "remetente_nome": email["remetente_nome"],
+                "recebido": email["recebido"].isoformat(),
+                "corpo": email["corpo"],
+            })
+
+        # Ordena cronologicamente e gera o resumo do HISTÓRICO COMPLETO.
+        registro["mensagens"].sort(key=lambda m: m["recebido"])
+        corpo_completo = "\n\n".join(m["corpo"] for m in registro["mensagens"])
+        resumo_atual = gerar_resumo(corpo_completo)
+
+        # Snapshot de resumo só quando muda (evita inflar o trail a cada poll).
+        if not registro["resumos"] or registro["resumos"][-1]["resumo"] != resumo_atual:
+            registro["resumos"].append({
+                "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "resumo": resumo_atual,
+            })
+
+        return registro
+
     def _montar_topico(self, topico: Dict[str, Any]) -> Dict[str, Any]:
-        """Constrói o dict final de um tópico (pronto para virar JSON)."""
+        """Constrói o dict final de um tópico (pronto para virar JSON).
+
+        Usa o HISTÓRICO COMPLETO acumulado (não só a varredura atual) para o
+        resumo e para a resposta sugerida.
+        """
         mensagens = sorted(topico["mensagens"], key=lambda m: m["recebido"])
         ultima = mensagens[-1]
 
-        # Resumo do tópico: concatena os corpos e resume (placeholder/LLM).
-        corpo_concatenado = "\n".join(m["corpo"] for m in mensagens)
-        resumo = gerar_resumo(corpo_concatenado)
+        # Funde no histórico e obtém resumo acumulado + trail.
+        registro = self._atualizar_historico(topico)
+        resumo = registro["resumos"][-1]["resumo"]
+        corpo_completo = "\n\n".join(m["corpo"] for m in registro["mensagens"])
 
         # Pessoa-chave em destaque: prioriza um remetente cadastrado.
         with self._lock:
@@ -647,13 +810,19 @@ class OutlookManager:
         if destaque is None:
             destaque = ultima["remetente_nome"] or ultima["remetente"]
 
+        # Resposta sugerida com base no histórico completo (placeholder/LLM).
+        resposta_sugerida = propor_resposta(topico["assunto"], corpo_completo, destaque)
+
         return {
             "chave": topico["chave"],
             "assunto": topico["assunto"],
             "pessoa_destaque": destaque,
             "participantes": sorted(topico["pessoas"]),
-            "qtd_mensagens": len(mensagens),
+            "qtd_mensagens": len(registro["mensagens"]),  # total acumulado
             "resumo": resumo,
+            "resposta_sugerida": resposta_sugerida,
+            "historico_resumos": registro["resumos"][-5:],  # últimos snapshots
+            "qtd_resumos": len(registro["resumos"]),
             "motivos": sorted(topico["motivos"]),
             "ultima_atualizacao": ultima["recebido"].strftime("%d/%m/%Y %H:%M"),
             # Campo auxiliar (ISO) usado só para ordenar no servidor.

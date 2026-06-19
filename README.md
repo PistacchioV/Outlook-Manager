@@ -72,12 +72,30 @@ a thread chama `pythoncom.CoInitialize()` ao iniciar e `pythoncom.CoUninitialize
 ao encerrar (em `outlook_manager.py::_worker_loop`). O reloader do Flask é
 desativado (`use_reloader=False`) para não duplicar a thread.
 
-## Plugar uma LLM para os resumos
+## Histórico de resumos e respostas sugeridas
 
-Hoje `gerar_resumo()` (em `outlook_manager.py`) é um placeholder por heurística.
-Para usar uma LLM real (ex.: Claude), substitua o corpo da função por uma
-chamada de API — há um exemplo comentado com o SDK da Anthropic no próprio
-docstring da função.
+Cada varredura **acumula** o histórico de cada tópico em `historico_topicos.json`
+(não versionado — contém corpo de e-mails):
+
+- **Mensagens únicas:** novas mensagens são anexadas com dedup por assinatura
+  (remetente + data + tamanho). No Outlook real o `ReceivedTime` é estável, então
+  a mesma mensagem nunca conta duas vezes.
+- **Trail de resumos:** um novo snapshot de resumo (com data/hora) é gravado
+  apenas quando o resumo **muda** — então o card mostra a evolução do tópico ao
+  longo do tempo (colapsável em "Histórico de resumos").
+- **Resposta sugerida:** gerada a partir do **histórico completo** do tópico e
+  exibida em cada card, com botão "Copiar".
+
+## Plugar uma LLM (resumos e respostas)
+
+Há dois pontos de extensão em `outlook_manager.py`, ambos com exemplo comentado
+do SDK da Anthropic (Claude) no docstring:
+
+- `gerar_resumo(texto)` — resumo curto do tópico.
+- `propor_resposta(assunto, historico_texto, destinatario)` — rascunho de
+  resposta com o fio **completo** da conversa como contexto (é onde a LLM mais
+  agrega). Hoje ambos são heurísticas (regex); basta trocar o corpo por uma
+  chamada de API.
 
 ## Endpoints da API
 

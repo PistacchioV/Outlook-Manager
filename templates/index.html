@@ -207,6 +207,63 @@
       color: var(--bs-secondary-color);
     }
 
+    /* ---------------- RESPOSTA SUGERIDA ---------------- */
+    .resposta-box {
+      border: 1px solid rgba(99,102,241,0.22);
+      background: rgba(99,102,241,0.06);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .resposta-head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.78rem; font-weight: 600; color: var(--accent);
+      margin-bottom: 6px;
+    }
+    .resposta-corpo {
+      font-size: 0.84rem; line-height: 1.5;
+      color: var(--bs-body-color);
+      white-space: pre-wrap;       /* preserva as quebras de linha do rascunho */
+    }
+    .btn-copiar {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 0.72rem; font-weight: 600;
+      padding: 4px 9px; border-radius: 7px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg); color: var(--bs-secondary-color);
+      cursor: pointer;
+      transition: transform var(--dur-press) var(--ease-out),
+                  color var(--dur-press) ease, border-color var(--dur-press) ease;
+    }
+    .btn-copiar:active { transform: scale(0.95); }
+    @media (hover: hover) and (pointer: fine) {
+      .btn-copiar:hover { color: var(--accent); border-color: var(--accent); }
+    }
+    .btn-copiar.copiado { color: #059669; border-color: rgba(16,185,129,0.4); }
+    [data-bs-theme="dark"] .btn-copiar.copiado { color: #34d399; }
+
+    /* ---------------- HISTÓRICO DE RESUMOS ---------------- */
+    .hist-box { margin-bottom: 6px; }
+    .hist-box > summary {
+      list-style: none; cursor: pointer;
+      font-size: 0.76rem; font-weight: 500;
+      color: var(--bs-secondary-color);
+      padding: 3px 0; user-select: none;
+    }
+    .hist-box > summary::-webkit-details-marker { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+      .hist-box > summary:hover { color: var(--accent); }
+    }
+    .hist-lista {
+      margin-top: 6px;
+      border-left: 2px solid var(--card-border);
+      padding-left: 10px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .hist-item { font-size: 0.78rem; }
+    .hist-data { color: var(--accent); font-weight: 600; margin-right: 6px; }
+    .hist-resumo { color: var(--bs-secondary-color); }
+
     /* ---------------- STATUS (dot pulsante) ---------------- */
     .status-dot {
       width: 8px; height: 8px; border-radius: 50%;
@@ -458,6 +515,25 @@
     setTimeout(() => renderConfig(cfg), 150);
   });
 
+  // Copiar resposta sugerida para a área de transferência.
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest(".btn-copiar");
+    if (!btn) return;
+    const texto = btn.dataset.copiar || "";
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      // Fallback para contextos sem Clipboard API (ex.: http simples).
+      const ta = document.createElement("textarea");
+      ta.value = texto; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy"); ta.remove();
+    }
+    const original = btn.innerHTML;
+    btn.classList.add("copiado");
+    btn.innerHTML = '<i class="bi bi-check-lg"></i> Copiado';
+    setTimeout(() => { btn.classList.remove("copiado"); btn.innerHTML = original; }, 1600);
+  });
+
   // =====================================================================
   // 4) FORMULÁRIOS
   // =====================================================================
@@ -588,16 +664,56 @@
         <span class="text-secondary small">· ${escapeHtml(participantes)}</span>
       </div>
       <p class="resumo mb-3"><i class="bi bi-stars me-1"></i>${escapeHtml(t.resumo)}</p>
-      <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+
+      ${respostaHtml(t)}
+      ${historicoHtml(t)}
+
+      <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-2">
         <div class="d-flex flex-wrap gap-1">${motivos}</div>
         <small class="text-secondary"><i class="bi bi-clock me-1"></i>${escapeHtml(t.ultima_atualizacao)}</small>
       </div>`;
   }
 
+  // Bloco "Resposta sugerida" com botão de copiar.
+  function respostaHtml(t) {
+    if (!t.resposta_sugerida) return "";
+    return `
+      <div class="resposta-box">
+        <div class="resposta-head">
+          <span><i class="bi bi-reply-fill me-1"></i>Resposta sugerida</span>
+          <button class="btn-copiar" data-copiar="${escapeAttr(t.resposta_sugerida)}">
+            <i class="bi bi-clipboard"></i> Copiar
+          </button>
+        </div>
+        <div class="resposta-corpo">${escapeHtml(t.resposta_sugerida)}</div>
+      </div>`;
+  }
+
+  // Histórico de resumos (colapsável) — só aparece se houver mais de um.
+  function historicoHtml(t) {
+    const hist = t.historico_resumos || [];
+    if (hist.length <= 1) return "";
+    const itens = hist.slice().reverse().map(h => `
+      <div class="hist-item">
+        <span class="hist-data">${escapeHtml(h.data)}</span>
+        <span class="hist-resumo">${escapeHtml(h.resumo)}</span>
+      </div>`).join("");
+    return `
+      <details class="hist-box">
+        <summary><i class="bi bi-clock-history me-1"></i>Histórico de resumos (${t.qtd_resumos})</summary>
+        <div class="hist-lista">${itens}</div>
+      </details>`;
+  }
+
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/\n/g, "&#10;");
+  }
+
   // Assinatura para decidir se precisa reescrever o conteúdo do card.
   function assinatura(t) {
     return JSON.stringify([t.assunto, t.pessoa_destaque, t.qtd_mensagens,
-                           t.resumo, t.ultima_atualizacao, t.motivos, t.participantes]);
+                           t.resumo, t.resposta_sugerida, t.qtd_resumos,
+                           t.ultima_atualizacao, t.motivos, t.participantes]);
   }
 
   function renderTopicos(data) {

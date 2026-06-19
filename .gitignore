@@ -10,6 +10,10 @@ env/
 config.json
 config.json.tmp
 
+# Histórico de tópicos (contém corpo de e-mails — NUNCA versionar)
+historico_topicos.json
+historico_topicos.json.tmp
+
 # Logs
 *.log
 
