@@ -95,13 +95,17 @@ Cada card mostra **só o resumo** da chain, em três partes:
 - **Pontos de atenção** — prazos/datas, valores e IDs, perguntas em aberto e
   pedidos, com etiqueta (`Prazo` / `Pedido` / `Pergunta` / `Número`).
 
-Como o motor "raciocina" (em `resumidor.py`):
+Como o motor "raciocina" (em `resumidor.py`) — uma versão enxuta de
+**TF-IDF + LexRank**, em Python puro:
 
 1. **Limpa** cada mensagem — remove citações (`De:/From:/On … wrote:`),
    assinaturas e disclaimers jurídicos (rodapé padrão do banco).
-2. **Pontua** cada frase pela frequência das palavras-chave da própria conversa
-   (TF sem stopwords), com bônus para termos de ação, perguntas, datas/valores
-   e a 1ª frase de cada mensagem.
+2. **Segmenta** em frases respeitando abreviações (`Sr.`), decimais
+   (`R$ 1.500,00`) e horas, e **pontua** cada frase combinando:
+   *informatividade* (peso TF-IDF — palavras raras/específicas pesam mais que
+   as onipresentes) + *centralidade* (quanto a frase representa o resto da
+   thread, via similaridade de cosseno) + bônus para ação, perguntas,
+   datas/valores e a 1ª frase de cada mensagem.
 3. **Seleciona** os melhores pontos e **remove redundância** (frases quase iguais
    via similaridade de Jaccard).
 4. **Extrai** os pontos de atenção por regex (datas, valores, IDs) e gatilhos.

@@ -115,6 +115,9 @@ class OutlookManager:
         self._topicos: Dict[str, Dict[str, Any]] = {}
         self.ultima_varredura: Optional[str] = None
         self.status_worker: str = "parado"
+        # True enquanto uma varredura está em andamento (lê + resume).
+        # Usado pelo painel para manter o spinner do "Varrer agora" girando.
+        self.varrendo: bool = False
         # Conta que o Outlook REALMENTE reconheceu na última varredura
         # bem-sucedida (None enquanto não conectou / em erro).
         self.conta_conectada: Optional[str] = None
@@ -266,6 +269,7 @@ class OutlookManager:
                 "topicos": topicos,
                 "ultima_varredura": self.ultima_varredura,
                 "status_worker": self.status_worker,
+                "varrendo": self.varrendo,
                 "modo_simulado": MODO_SIMULADO,
                 "conta_email": self.conta_email,        # conta configurada
                 "conta_conectada": self.conta_conectada,  # conta reconhecida
@@ -362,6 +366,7 @@ class OutlookManager:
 
     def _executar_varredura_segura(self) -> None:
         """Envolve a varredura em try/except para o loop nunca morrer."""
+        self.varrendo = True  # liga o spinner do painel
         try:
             if MODO_SIMULADO:
                 emails = self._coletar_emails_simulados()
@@ -382,6 +387,8 @@ class OutlookManager:
             self.status_worker = f"erro: {exc}"
             self.conta_conectada = None  # não confirmamos a caixa
             print(f"[worker] ERRO na varredura: {exc}", flush=True)
+        finally:
+            self.varrendo = False  # desliga o spinner
 
     # ----------------------------------------------------------------- #
     # Coleta — Outlook real                                             #

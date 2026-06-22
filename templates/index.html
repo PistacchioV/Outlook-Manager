@@ -122,6 +122,21 @@
     }
     /* Ícone do tema gira sutilmente ao trocar. */
     .icon-btn i { transition: transform var(--dur-hover) var(--ease-out); }
+    /* "Varrer agora" girando enquanto a varredura roda (lê + resume). */
+    #btn-varrer.is-spinning {
+      border-color: var(--accent);
+      color: var(--accent);
+      cursor: progress;
+    }
+    #btn-varrer.is-spinning i {
+      transition: none;
+      animation: girar 0.8s linear infinite;
+    }
+    #btn-varrer:disabled { opacity: 1; }   /* mantém o visual, só bloqueia clique */
+    @keyframes girar { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #btn-varrer.is-spinning i { animation-duration: 1.6s; }
+    }
 
     /* ---------------- BADGES (chips de config) ---------------- */
     .chip {
@@ -556,10 +571,37 @@
 
   const btnVarrer = document.getElementById("btn-varrer");
   btnVarrer.addEventListener("click", async () => {
-    btnVarrer.querySelector("i").style.transform = "rotate(360deg)";
-    setTimeout(() => { btnVarrer.querySelector("i").style.transform = ""; }, 400);
-    await api("/api/varrer-agora", "POST");
-    setTimeout(atualizarTopicos, 1200);
+    if (pollVarredura) return;                 // já tem um ciclo em andamento
+    setSpinner(true);                          // gira já, de forma otimista
+    const marcoInicial = ultimaVarreduraVista; // p/ detectar "concluiu"
+    try { await api("/api/varrer-agora", "POST"); }
+    catch (err) { console.error("Falha ao disparar varredura:", err); }
+
+    // Acompanha o estado REAL: gira enquanto o worker lê + resume e só para
+    // quando a varredura termina (ou após um timeout de segurança).
+    let viuComecar = false;
+    let tentativas = 0;
+    pollVarredura = setInterval(async () => {
+      tentativas += 1;
+      let varrendo = false;
+      try {
+        const data = await api("/api/topicos");
+        varrendo = !!data.varrendo;
+        renderTopicos(data);                   // atualiza cards + status
+      } catch (err) { console.error(err); }
+
+      if (varrendo) viuComecar = true;
+      const concluiu = viuComecar && !varrendo; // começou e terminou
+      const varreuRapido =                       // rápido demais p/ "ver" girar
+        !varrendo && ultimaVarreduraVista && ultimaVarreduraVista !== marcoInicial;
+
+      if (concluiu || varreuRapido || tentativas >= 25 /* ~15s */) {
+        clearInterval(pollVarredura);
+        pollVarredura = null;
+        setSpinner(false);
+        atualizarTopicos();                    // refresh final
+      }
+    }, 600);
   });
 
   // =====================================================================
@@ -588,7 +630,19 @@
     document.getElementById("info-varredura").textContent =
       data.ultima_varredura ? `Última varredura · ${data.ultima_varredura}` : "";
 
+    ultimaVarreduraVista = data.ultima_varredura;
+    // Fora de um clique em "Varrer agora", o spinner reflete o estado real
+    // do worker (o ciclo forçado, quando ativo, controla o spinner sozinho).
+    if (!pollVarredura) setSpinner(!!data.varrendo);
+
     renderContaStatus(data);
+  }
+
+  // Liga/desliga o giro contínuo do botão "Varrer agora".
+  function setSpinner(ligado) {
+    btnVarrer.classList.toggle("is-spinning", ligado);
+    btnVarrer.disabled = ligado;
+    btnVarrer.title = ligado ? "Varrendo…" : "Varrer agora";
   }
 
   // Confirma se o Outlook reconheceu a caixa configurada na última varredura.
@@ -651,6 +705,8 @@
   const feed = document.getElementById("feed-topicos");
   const renderedCards = new Map();   // chave -> { el, sig }
   let firstLoad = true;
+  let pollVarredura = null;          // timer do ciclo forçado de "Varrer agora"
+  let ultimaVarreduraVista = null;   // p/ detectar varredura concluída
 
   function cardInnerHtml(t) {
     const motivos = (t.motivos || [])
