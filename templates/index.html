@@ -220,70 +220,44 @@
       margin-bottom: 3px;
     }
     .bloco-label .bi { color: var(--accent-soft); }
-    .motor-tag {
-      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em;
-      padding: 1px 6px; border-radius: 5px; text-transform: none;
-    }
-    .motor-tag.gemini { background: rgba(99,102,241,0.14); color: var(--accent); }
-    .motor-tag.gemini .bi { font-size: 0.6rem; }
-    .motor-tag.local { background: rgba(120,120,140,0.14); color: var(--bs-secondary-color); }
 
-    /* ---------------- RESPOSTA SUGERIDA ---------------- */
-    .resposta-box {
-      border: 1px solid rgba(99,102,241,0.22);
-      background: rgba(99,102,241,0.06);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
-      margin-bottom: 10px;
+    /* Visão geral: síntese de 1 linha no topo do resumo. */
+    .resumo-visao {
+      font-size: 0.86rem; line-height: 1.5;
+      color: var(--bs-body-color); font-weight: 500;
     }
-    .resposta-head {
-      display: flex; justify-content: space-between; align-items: center;
-      font-size: 0.78rem; font-weight: 600; color: var(--accent);
-      margin-bottom: 6px;
-    }
-    .resposta-corpo {
-      font-size: 0.84rem; line-height: 1.5;
-      color: var(--bs-body-color);
-      white-space: pre-wrap;       /* preserva as quebras de linha do rascunho */
-    }
-    .btn-copiar {
-      display: inline-flex; align-items: center; gap: 5px;
-      font-size: 0.72rem; font-weight: 600;
-      padding: 4px 9px; border-radius: 7px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg); color: var(--bs-secondary-color);
-      cursor: pointer;
-      transition: transform var(--dur-press) var(--ease-out),
-                  color var(--dur-press) ease, border-color var(--dur-press) ease;
-    }
-    .btn-copiar:active { transform: scale(0.95); }
-    @media (hover: hover) and (pointer: fine) {
-      .btn-copiar:hover { color: var(--accent); border-color: var(--accent); }
-    }
-    .btn-copiar.copiado { color: #059669; border-color: rgba(16,185,129,0.4); }
-    [data-bs-theme="dark"] .btn-copiar.copiado { color: #34d399; }
 
-    /* ---------------- HISTÓRICO DE RESUMOS ---------------- */
-    .hist-box { margin-bottom: 6px; }
-    .hist-box > summary {
-      list-style: none; cursor: pointer;
-      font-size: 0.76rem; font-weight: 500;
-      color: var(--bs-secondary-color);
-      padding: 3px 0; user-select: none;
+    /* ---------------- PONTOS DE ATENÇÃO ---------------- */
+    .atencao-bloco {
+      margin-top: 10px; padding-top: 9px;
+      border-top: 1px dashed var(--card-border);
     }
-    .hist-box > summary::-webkit-details-marker { display: none; }
-    @media (hover: hover) and (pointer: fine) {
-      .hist-box > summary:hover { color: var(--accent); }
+    .atencao-label {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #b45309; margin-bottom: 5px;
+      display: flex; align-items: center; gap: 5px;
     }
-    .hist-lista {
-      margin-top: 6px;
-      border-left: 2px solid var(--card-border);
-      padding-left: 10px;
-      display: flex; flex-direction: column; gap: 6px;
+    [data-bs-theme="dark"] .atencao-label { color: #fbbf24; }
+    .atencao-label .bi { color: #f59e0b; }
+    .atencao-lista {
+      margin: 0; padding-left: 2px; list-style: none;
+      font-size: 0.83rem; line-height: 1.55; color: var(--bs-secondary-color);
     }
-    .hist-item { font-size: 0.78rem; }
-    .hist-data { color: var(--accent); font-weight: 600; margin-right: 6px; }
-    .hist-resumo { color: var(--bs-secondary-color); }
+    .atencao-lista li { margin-bottom: 4px; }
+    .atencao-tipo {
+      display: inline-block; min-width: 62px; text-align: center;
+      font-size: 0.64rem; font-weight: 700; letter-spacing: 0.02em;
+      padding: 1px 7px; border-radius: 5px; margin-right: 6px;
+      text-transform: uppercase; vertical-align: 1px;
+    }
+    .atencao-tipo.tipo-prazo    { background: rgba(239,68,68,0.14);  color: #dc2626; }
+    .atencao-tipo.tipo-pedido   { background: rgba(99,102,241,0.14); color: var(--accent); }
+    .atencao-tipo.tipo-pergunta { background: rgba(245,158,11,0.16); color: #b45309; }
+    .atencao-tipo.tipo-numero   { background: rgba(16,185,129,0.14); color: #059669; }
+    [data-bs-theme="dark"] .atencao-tipo.tipo-prazo    { color: #f87171; }
+    [data-bs-theme="dark"] .atencao-tipo.tipo-pergunta { color: #fbbf24; }
+    [data-bs-theme="dark"] .atencao-tipo.tipo-numero   { color: #34d399; }
 
     /* ---------------- STATUS (dot pulsante) ---------------- */
     .status-dot {
@@ -543,25 +517,6 @@
     setTimeout(() => renderConfig(cfg), 150);
   });
 
-  // Copiar resposta sugerida para a área de transferência.
-  document.addEventListener("click", async (ev) => {
-    const btn = ev.target.closest(".btn-copiar");
-    if (!btn) return;
-    const texto = btn.dataset.copiar || "";
-    try {
-      await navigator.clipboard.writeText(texto);
-    } catch {
-      // Fallback para contextos sem Clipboard API (ex.: http simples).
-      const ta = document.createElement("textarea");
-      ta.value = texto; document.body.appendChild(ta);
-      ta.select(); document.execCommand("copy"); ta.remove();
-    }
-    const original = btn.innerHTML;
-    btn.classList.add("copiado");
-    btn.innerHTML = '<i class="bi bi-check-lg"></i> Copiado';
-    setTimeout(() => { btn.classList.remove("copiado"); btn.innerHTML = original; }, 1600);
-  });
-
   // =====================================================================
   // 4) FORMULÁRIOS
   // =====================================================================
@@ -715,16 +670,10 @@
       </div>
       <div class="bloco mb-2">
         <div class="bloco-label">
-          <i class="bi bi-stars"></i> Resumo da conversa
-          ${t.resumo_fonte === "gemini"
-            ? '<span class="motor-tag gemini"><i class="bi bi-stars"></i> Gemini</span>'
-            : '<span class="motor-tag local">Local</span>'}
+          <i class="bi bi-card-text"></i> Resumo da conversa
         </div>
         ${resumoHtml(t)}
       </div>
-
-      ${respostaHtml(t)}
-      ${historicoHtml(t)}
 
       <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-2">
         <div class="d-flex flex-wrap gap-1">${motivos}</div>
@@ -732,59 +681,36 @@
       </div>`;
   }
 
-  // Resumo da chain em bullets (um ponto por mensagem). Fallback: texto.
+  // Resumo estruturado e 100% local: visão geral + pontos + pontos de atenção.
+  // (t.resumo = { visao_geral, pontos: [{autor, ponto}], atencao: [{tipo, texto}] })
   function resumoHtml(t) {
-    const bullets = t.resumo_bullets;
-    if (Array.isArray(bullets) && bullets.length) {
-      const itens = bullets.map(b => `
-        <li>${b.autor ? `<strong>${escapeHtml(b.autor)}:</strong> ` : ""}${escapeHtml(b.ponto)}</li>`
-      ).join("");
-      return `<ul class="resumo-lista">${itens}</ul>`;
+    const r = t.resumo;
+    if (!r || typeof r !== "object") {
+      return `<p class="resumo mb-0">${escapeHtml(r || "—")}</p>`;
     }
-    return `<p class="resumo mb-0">${escapeHtml(t.resumo || "—")}</p>`;
-  }
+    const visao = r.visao_geral
+      ? `<p class="resumo-visao mb-2">${escapeHtml(r.visao_geral)}</p>` : "";
 
-  // Bloco "Resposta sugerida" com botão de copiar.
-  function respostaHtml(t) {
-    const txt = (t.resposta_sugerida || "").trim();
-    if (!txt) return "";
-    return `
-      <div class="resposta-box">
-        <div class="resposta-head">
-          <span><i class="bi bi-reply-fill me-1"></i>Resposta sugerida</span>
-          <button class="btn-copiar" data-copiar="${escapeAttr(t.resposta_sugerida)}">
-            <i class="bi bi-clipboard"></i> Copiar
-          </button>
-        </div>
-        <div class="resposta-corpo">${escapeHtml(t.resposta_sugerida)}</div>
-      </div>`;
-  }
+    const pontos = Array.isArray(r.pontos) && r.pontos.length
+      ? `<ul class="resumo-lista">${r.pontos.map(p =>
+          `<li>${p.autor ? `<strong>${escapeHtml(p.autor)}:</strong> ` : ""}${escapeHtml(p.ponto)}</li>`
+        ).join("")}</ul>` : "";
 
-  // Histórico de resumos (colapsável) — só aparece se houver mais de um.
-  function historicoHtml(t) {
-    const hist = t.historico_resumos || [];
-    if (hist.length <= 1) return "";
-    const itens = hist.slice().reverse().map(h => `
-      <div class="hist-item">
-        <span class="hist-data">${escapeHtml(h.data)}</span>
-        <span class="hist-resumo">${escapeHtml(h.resumo)}</span>
-      </div>`).join("");
-    return `
-      <details class="hist-box">
-        <summary><i class="bi bi-clock-history me-1"></i>Histórico de resumos (${t.qtd_resumos})</summary>
-        <div class="hist-lista">${itens}</div>
-      </details>`;
-  }
+    const atencao = Array.isArray(r.atencao) && r.atencao.length
+      ? `<div class="atencao-bloco">
+           <div class="atencao-label"><i class="bi bi-exclamation-triangle-fill"></i> Pontos de atenção</div>
+           <ul class="atencao-lista">${r.atencao.map(a =>
+             `<li><span class="atencao-tipo tipo-${escapeHtml((a.tipo||"").toLowerCase())}">${escapeHtml(a.tipo)}</span> ${escapeHtml(a.texto)}</li>`
+           ).join("")}</ul>
+         </div>` : "";
 
-  function escapeAttr(s) {
-    return escapeHtml(s).replace(/\n/g, "&#10;");
+    return visao + pontos + atencao || `<p class="resumo mb-0">—</p>`;
   }
 
   // Assinatura para decidir se precisa reescrever o conteúdo do card.
   function assinatura(t) {
     return JSON.stringify([t.assunto, t.pessoa_destaque, t.qtd_mensagens,
-                           t.resumo, t.resumo_fonte, t.resposta_sugerida, t.qtd_resumos,
-                           t.ultima_atualizacao, t.motivos, t.participantes]);
+                           t.resumo, t.ultima_atualizacao, t.motivos, t.participantes]);
   }
 
   function renderTopicos(data) {

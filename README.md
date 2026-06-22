@@ -10,6 +10,7 @@ agrupa por **tópico/thread** e gera um **resumo** curto de cada tópico.
 Outlook-Manager/
 ├── app.py                # Servidor Flask + rotas da API JSON
 ├── outlook_manager.py    # Lógica do Outlook (pywin32) + background worker
+├── resumidor.py          # Motor de resumo 100% LOCAL (sem IA/rede)
 ├── requirements.txt
 └── templates/
     └── index.html        # Interface (Bootstrap 5, tema light/dark, polling)
@@ -72,60 +73,42 @@ a thread chama `pythoncom.CoInitialize()` ao iniciar e `pythoncom.CoUninitialize
 ao encerrar (em `outlook_manager.py::_worker_loop`). O reloader do Flask é
 desativado (`use_reloader=False`) para não duplicar a thread.
 
-## Histórico de resumos e respostas sugeridas
+## Histórico acumulado
 
-Cada varredura **acumula** o histórico de cada tópico em `historico_topicos.json`
-(não versionado — contém corpo de e-mails):
+Cada varredura **acumula** as mensagens de cada tópico em `historico_topicos.json`
+(não versionado — contém corpo de e-mails). Novas mensagens são anexadas com
+dedup por assinatura (remetente + data + tamanho). No Outlook real o
+`ReceivedTime` é estável, então a mesma mensagem nunca conta duas vezes. O resumo
+é recalculado apenas quando o nº de mensagens do tópico muda (cache).
 
-- **Mensagens únicas:** novas mensagens são anexadas com dedup por assinatura
-  (remetente + data + tamanho). No Outlook real o `ReceivedTime` é estável, então
-  a mesma mensagem nunca conta duas vezes.
-- **Trail de resumos:** um novo snapshot de resumo (com data/hora) é gravado
-  apenas quando o resumo **muda** — então o card mostra a evolução do tópico ao
-  longo do tempo (colapsável em "Histórico de resumos").
-- **Resposta sugerida:** gerada a partir do **histórico completo** do tópico e
-  exibida em cada card, com botão "Copiar".
+## Resumo da conversa — 100% LOCAL (`resumidor.py`)
 
-## Resumos e respostas
+O resumo é **inteiramente local e determinístico**: nada sai da máquina, nenhuma
+chamada de rede, nenhuma IA externa, nenhuma credencial — adequado a DLP /
+compliance. O mesmo conjunto de e-mails sempre produz exatamente o mesmo resumo.
 
-Por padrão é **100% local** (determinístico, nada sai da máquina). Há um backend
-**opcional** de LLM (Gemini) que, se configurado, melhora o resumo/resposta — e
-cai automaticamente no local em qualquer erro.
+Cada card mostra **só o resumo** da chain, em três partes:
 
-### Backend opcional Gemini (`genai_backend.py`)
+- **Visão geral** — síntese de 1 linha: assunto, nº de mensagens e participantes.
+- **Pontos** — as frases mais relevantes da conversa, atribuídas a quem falou,
+  em ordem cronológica.
+- **Pontos de atenção** — prazos/datas, valores e IDs, perguntas em aberto e
+  pedidos, com etiqueta (`Prazo` / `Pedido` / `Pergunta` / `Número`).
 
-Desligado por padrão. Só ativa se houver credenciais no ambiente — sem isso,
-nada é enviado para fora. ⚠️ **Em ambiente corporativo, valide com TI/Compliance
-antes de ativar** (envia conteúdo de e-mail para o Google). Use de preferência
-**Vertex AI** num projeto GCP aprovado.
+Como o motor "raciocina" (em `resumidor.py`):
 
-```bat
-:: Opção A — Gemini API por chave
-set GOOGLE_API_KEY=...
-:: Opção B — Vertex AI (projeto corporativo aprovado)
-set GOOGLE_GENAI_USE_VERTEXAI=1
-set GOOGLE_CLOUD_PROJECT=seu-projeto
-set GOOGLE_CLOUD_LOCATION=us-central1
-:: desligar à força: set TC_USE_GENAI=0   |   trocar modelo: set TC_GENAI_MODEL=...
-```
+1. **Limpa** cada mensagem — remove citações (`De:/From:/On … wrote:`),
+   assinaturas e disclaimers jurídicos (rodapé padrão do banco).
+2. **Pontua** cada frase pela frequência das palavras-chave da própria conversa
+   (TF sem stopwords), com bônus para termos de ação, perguntas, datas/valores
+   e a 1ª frase de cada mensagem.
+3. **Seleciona** os melhores pontos e **remove redundância** (frases quase iguais
+   via similaridade de Jaccard).
+4. **Extrai** os pontos de atenção por regex (datas, valores, IDs) e gatilhos.
 
-Quando ativo, o card mostra um selo **Gemini**; senão, usa o resumo local. A LLM
-só é chamada quando há mensagem nova no tópico (cache por nº de mensagens).
-
-### Processamento local (padrão e fallback)
-
-Roda na própria máquina, de forma determinística, em `outlook_manager.py`:
-
-- `gerar_resumo(texto)` — **sumarização extrativa**: pontua cada frase pela
-  frequência de palavras relevantes (descartando stopwords PT-BR), com bônus
-  para a 1ª frase e para frases com termos de ação (urgente, prazo, liquidação,
-  confirmar…), e escolhe as melhores reordenadas pela posição original.
-- `propor_resposta(assunto, historico_texto, destinatario)` — rascunho por
-  regras: detecta urgência, prazos, perguntas e pedidos de confirmação no
-  histórico completo e monta uma resposta cordial pronta para revisão.
-
-Para ajustar a saída, edite as listas `_STOPWORDS_PT` / `_TERMOS_ACAO` (resumo)
-e as frases/gatilhos dentro de `propor_resposta` — sem nenhuma dependência extra.
+Para ajustar a saída, edite no `resumidor.py` as listas `_STOPWORDS` /
+`_TERMOS_ACAO` / `_PEDIDO` e as expressões `_RE_DATA` / `_RE_VALOR` / `_RE_ID`
+— sem nenhuma dependência extra.
 
 ## Endpoints da API
 

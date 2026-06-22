@@ -37,7 +37,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-import genai_backend  # backend opcional Gemini (desligado se sem credenciais)
+import resumidor  # motor de resumo 100% local (sem IA/rede) — ver resumidor.py
 
 # Arquivos de persistência (mesmo diretório do módulo).
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -58,195 +58,6 @@ except Exception:  # ImportError no Mac/Linux, ou ambiente sem Outlook.
     pythoncom = None  # type: ignore
     win32com = None  # type: ignore
     MODO_SIMULADO = True
-
-
-# ===========================================================================
-# RESUMO AUTOMÁTICO (extrativo, 100% local — sem LLM/chamadas externas)
-# ===========================================================================
-# Stopwords PT-BR mais comuns: ignoradas ao pontuar a relevância das frases.
-_STOPWORDS_PT = {
-    "a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos",
-    "das", "em", "no", "na", "nos", "nas", "por", "para", "pra", "com", "sem",
-    "e", "ou", "mas", "que", "se", "ao", "aos", "à", "às", "é", "ser", "foi",
-    "são", "este", "esta", "isso", "isto", "esse", "essa", "como", "mais",
-    "menos", "já", "não", "sim", "the", "of", "to", "and", "in", "on", "for",
-    "seu", "sua", "seus", "suas", "meu", "minha", "nós", "eu", "ele", "ela",
-    "lhe", "me", "te", "vos", "todo", "toda", "todos", "todas", "muito",
-    "pelo", "pela", "até", "também", "está", "estão", "ter", "tem", "favor",
-}
-
-# Termos que sinalizam ação/urgência: dão um leve "boost" à frase no ranking.
-_TERMOS_ACAO = {
-    "urgente", "prazo", "hoje", "amanha", "amanhã", "confirmar", "confirmação",
-    "aprovar", "aprovação", "pendente", "vencimento", "deadline", "favor",
-    "erro", "bug", "falha", "crítico", "critico", "imediato", "asap",
-    "liquidação", "liquidacao", "settlement", "trade", "registro",
-}
-
-
-def _limpar_corpo(texto: str) -> str:
-    """Normaliza espaços e corta cadeias de resposta antigas / assinaturas."""
-    limpo = re.sub(r"\s+", " ", texto or "").strip()
-    return re.split(
-        r"(?:^|\s)(?:De:|From:|Enviada em:|Sent:|-{3,}|_{3,})", limpo
-    )[0].strip()
-
-
-def _top_frases(texto: str, n: int) -> List[str]:
-    """Retorna as ``n`` frases mais relevantes de um texto, em ordem original.
-
-    Sumarização extrativa determinística (sem LLM): pontua cada frase pela
-    frequência das palavras relevantes (sem stopwords), normalizada pelo
-    tamanho, com bônus para a 1ª frase e para frases com termos de ação.
-    """
-    limpo = _limpar_corpo(texto)
-    if not limpo:
-        return []
-
-    frases = [f.strip() for f in re.split(r"(?<=[.!?])\s+", limpo) if f.strip()]
-    if len(frases) <= n:
-        return frases
-
-    freq: Dict[str, int] = {}
-    for palavra in re.findall(r"[a-zà-ú0-9]+", _normalizar(limpo)):
-        if len(palavra) <= 2 or palavra in _STOPWORDS_PT:
-            continue
-        freq[palavra] = freq.get(palavra, 0) + 1
-
-    pontuadas = []
-    for idx, frase in enumerate(frases):
-        palavras = [
-            p for p in re.findall(r"[a-zà-ú0-9]+", _normalizar(frase))
-            if len(p) > 2 and p not in _STOPWORDS_PT
-        ]
-        if not palavras:
-            score = 0.0
-        else:
-            base = sum(freq.get(p, 0) for p in palavras) / (len(palavras) ** 0.5)
-            bonus_acao = 1.25 if any(p in _TERMOS_ACAO for p in palavras) else 1.0
-            bonus_inicio = 1.15 if idx == 0 else 1.0
-            score = base * bonus_acao * bonus_inicio
-        pontuadas.append((score, idx, frase))
-
-    melhores = sorted(pontuadas, key=lambda x: x[0], reverse=True)[:n]
-    melhores.sort(key=lambda x: x[1])
-    return [f for _, _, f in melhores]
-
-
-def gerar_resumo(texto: str, max_frases: int = 3) -> str:
-    """Resume um texto único por sumarização extrativa (string). Sem LLM."""
-    if not texto or not texto.strip():
-        return "Sem conteúdo para resumir."
-    frases = _top_frases(texto, max_frases)
-    if not frases:
-        return _limitar(_limpar_corpo(texto))
-    return _limitar(" ".join(frases))
-
-
-def gerar_resumo_chain(mensagens: List[Dict[str, Any]], max_msgs: int = 10) -> List[Dict[str, str]]:
-    """Resume a CHAIN inteira em bullets: um ponto-chave por mensagem.
-
-    Em vez de um preview do último e-mail, percorre TODAS as mensagens do
-    tópico (em ordem cronológica) e extrai o ponto principal de cada uma —
-    ``[{"autor": "Maria", "ponto": "..."}, ...]`` — pronto para virar uma
-    lista de bullets no painel. 100% local, determinístico, sem LLM.
-
-    Args:
-        mensagens: Lista de mensagens do histórico (cada uma com
-            ``remetente_nome``/``remetente`` e ``corpo``), já cronológica.
-        max_msgs: Limite de bullets; se a chain for maior, as mais antigas
-            são condensadas em um bullet de contagem.
-
-    Returns:
-        Lista de dicts ``{"autor", "ponto"}``. Nunca lança exceção.
-    """
-    if not mensagens:
-        return []
-
-    bullets: List[Dict[str, str]] = []
-    visiveis = mensagens[-max_msgs:]
-    omitidas = len(mensagens) - len(visiveis)
-    if omitidas > 0:
-        bullets.append({
-            "autor": "",
-            "ponto": f"(+{omitidas} mensagem(ns) anterior(es) no histórico)",
-        })
-
-    for m in visiveis:
-        nome = (m.get("remetente_nome") or m.get("remetente") or "").strip()
-        autor = nome.split(" ")[0] if nome else ""
-        frases = _top_frases(m.get("corpo", ""), 1)
-        ponto = _limitar(frases[0], 220) if frases else "(sem texto legível)"
-        bullets.append({"autor": autor, "ponto": ponto})
-
-    return bullets
-
-
-def _bullets_para_texto(bullets: List[Dict[str, str]]) -> str:
-    """Serializa os bullets em texto (usado no trail de resumos e no dedup)."""
-    linhas = []
-    for b in bullets:
-        prefixo = f"{b['autor']}: " if b.get("autor") else ""
-        linhas.append(f"• {prefixo}{b['ponto']}")
-    return "\n".join(linhas)
-
-
-def _limitar(texto: str, limite: int = 320) -> str:
-    """Corta o texto em ``limite`` caracteres sem quebrar no meio da palavra."""
-    if len(texto) <= limite:
-        return texto
-    corte = texto[:limite].rsplit(" ", 1)[0]
-    return corte.rstrip() + "..."
-
-
-def propor_resposta(assunto: str, historico_texto: str, destinatario: str = "") -> str:
-    """Propõe um rascunho de resposta com base no HISTÓRICO COMPLETO do tópico.
-
-    Implementação **determinística e 100% local** (sem LLM/chamadas externas,
-    adequada a ambientes corporativos com restrição de API): detecta sinais no
-    histórico — urgência, prazos, perguntas e pedidos de confirmação — e monta
-    um rascunho profissional curto em português, pronto para revisão humana.
-
-    Para ajustar o tom/conteúdo, edite as frases de ``linhas`` abaixo e os
-    conjuntos de gatilhos (``urgente``/``tem_prazo``/etc.).
-
-    Args:
-        assunto: Assunto do tópico.
-        historico_texto: Concatenação de TODAS as mensagens do tópico.
-        destinatario: Nome da pessoa-chave (saudação personalizada).
-
-    Returns:
-        Rascunho de resposta. Nunca lança exceção.
-    """
-    texto = _normalizar(historico_texto)
-    primeiro_nome = (destinatario or "").strip().split(" ")[0] or "tudo bem"
-    saudacao = f"Olá {primeiro_nome}," if destinatario else "Olá,"
-
-    # Sinais detectados no histórico.
-    urgente = any(p in texto for p in ("urgente", "asap", "imediato", "hoje ainda", "o quanto antes"))
-    tem_prazo = any(p in texto for p in ("prazo", "ate sexta", "ate amanha", "vencimento", "deadline", "ate o fim"))
-    tem_pergunta = "?" in historico_texto or any(
-        p in texto for p in ("voce pode", "poderia", "consegue", "pode confirmar", "qual ", "quando ")
-    )
-    pede_confirmacao = any(p in texto for p in ("confirmar", "confirma", "de acordo", "aprovar", "aprovacao"))
-
-    linhas = [saudacao, ""]
-    linhas.append(f"Obrigado pelo retorno sobre \"{assunto.strip()}\".")
-
-    if urgente:
-        linhas.append("Entendi a urgência e já estou priorizando este ponto.")
-    if tem_pergunta:
-        linhas.append("Sobre os pontos levantados, vou verificar internamente e retorno com os detalhes.")
-    if pede_confirmacao:
-        linhas.append("Assim que validar, envio a confirmação formal.")
-    if tem_prazo:
-        linhas.append("Estou atento ao prazo mencionado e darei retorno dentro dele.")
-    if not (urgente or tem_pergunta or pede_confirmacao or tem_prazo):
-        linhas.append("Fico à disposição para seguir com os próximos passos.")
-
-    linhas.append("")
-    linhas.append("Atenciosamente,")
-    return "\n".join(linhas)
 
 
 # ===========================================================================
@@ -475,10 +286,9 @@ class OutlookManager:
         modo = "SIMULADO" if MODO_SIMULADO else "OUTLOOK (pywin32)"
         print(
             f"[worker] iniciado | modo={modo} | conta-alvo={self.conta_email or '(padrão)'}"
-            f" | intervalo={self.intervalo_segundos}s",
+            f" | intervalo={self.intervalo_segundos}s | resumo=LOCAL (resumidor.py)",
             flush=True,
         )
-        genai_backend.log_estado()  # estado do backend Gemini (ativo/local/por quê)
 
     def parar_worker(self) -> None:
         """Sinaliza parada e aguarda a thread encerrar."""
@@ -865,17 +675,18 @@ class OutlookManager:
         return f"{_normalizar(email['remetente'])}|{iso}|{len(email.get('corpo',''))}"
 
     def _atualizar_historico(self, topico: Dict[str, Any]):
-        """Funde as mensagens do tópico no histórico e devolve (registro, bullets).
+        """Funde as mensagens do tópico no histórico e devolve (registro, resumo).
 
         - Acrescenta apenas mensagens inéditas (dedup por assinatura).
-        - Resume a CHAIN inteira em bullets (um ponto por mensagem) e grava um
-          snapshot do resumo (com data) quando ele MUDA.
+        - Resume a CHAIN COMPLETA com o motor LOCAL ``resumidor.py`` (visão
+          geral + pontos + pontos de atenção), recalculando só quando o nº de
+          mensagens muda (cache) — sem rede, sem IA, 100% determinístico.
         Roda apenas na thread do worker (sem necessidade de lock no histórico).
         """
         chave = topico["chave"]
         registro = self._historico.get(chave)
         if registro is None:
-            registro = {"assunto": topico["assunto"], "mensagens": [], "resumos": []}
+            registro = {"assunto": topico["assunto"], "mensagens": []}
             self._historico[chave] = registro
 
         registro["assunto"] = topico["assunto"]  # mantém o assunto mais recente
@@ -894,48 +705,32 @@ class OutlookManager:
                 "corpo": email["corpo"],
             })
 
-        # Ordena cronologicamente e resume a CHAIN COMPLETA em bullets.
-        # Recalcula só quando o nº de mensagens muda (cache) — evita refazer o
-        # resumo (e chamar a LLM) a cada poll quando nada mudou.
+        # Ordena cronologicamente e resume a CHAIN COMPLETA (cache por nº de msgs).
         registro["mensagens"].sort(key=lambda m: m["recebido"])
         n = len(registro["mensagens"])
-        if n != registro.get("_resumo_n", -1) or "_resumo_bullets" not in registro:
-            bullets = None
-            fonte = "local"
-            if genai_backend.ativo():
-                bullets = genai_backend.resumir_chain(registro["mensagens"])
-                if bullets:
-                    fonte = "gemini"
-            if not bullets:  # indisponível ou erro -> fallback local
-                bullets = gerar_resumo_chain(registro["mensagens"])
-            registro["_resumo_bullets"] = bullets
-            registro["_resumo_fonte"] = fonte
+        if n != registro.get("_resumo_n", -1) or "_resumo" not in registro:
+            participantes = sorted({
+                (m.get("remetente_nome") or m.get("remetente") or "")
+                for m in registro["mensagens"]
+            } - {""})
+            registro["_resumo"] = resumidor.resumir_conversa(
+                registro["mensagens"], registro["assunto"], participantes
+            )
             registro["_resumo_n"] = n
-        bullets = registro["_resumo_bullets"]
-        resumo_str = _bullets_para_texto(bullets)
 
-        # Snapshot só quando muda (evita inflar o trail a cada poll).
-        if not registro["resumos"] or registro["resumos"][-1]["resumo"] != resumo_str:
-            registro["resumos"].append({
-                "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "resumo": resumo_str,
-            })
-
-        return registro, bullets
+        return registro, registro["_resumo"]
 
     def _montar_topico(self, topico: Dict[str, Any]) -> Dict[str, Any]:
         """Constrói o dict final de um tópico (pronto para virar JSON).
 
         Usa o HISTÓRICO COMPLETO acumulado (não só a varredura atual) para o
-        resumo (em bullets) e para a resposta sugerida.
+        resumo estruturado da conversa. Foco no resumo — sem resposta sugerida.
         """
         mensagens = sorted(topico["mensagens"], key=lambda m: m["recebido"])
         ultima = mensagens[-1]
 
-        # Funde no histórico e obtém o resumo da chain (bullets) + trail.
-        registro, resumo_bullets = self._atualizar_historico(topico)
-        resumo = registro["resumos"][-1]["resumo"]
-        corpo_completo = "\n\n".join(m["corpo"] for m in registro["mensagens"])
+        # Funde no histórico e obtém o resumo estruturado da chain.
+        registro, resumo = self._atualizar_historico(topico)
 
         # Pessoa-chave em destaque: prioriza um remetente cadastrado.
         with self._lock:
@@ -948,31 +743,13 @@ class OutlookManager:
         if destaque is None:
             destaque = ultima["remetente_nome"] or ultima["remetente"]
 
-        # Resposta sugerida (Gemini se ativo, senão heurística local), com cache
-        # por nº de mensagens para não recomputar/chamar a LLM a cada poll.
-        n = len(registro["mensagens"])
-        if n != registro.get("_resp_n", -1) or "_resp" not in registro:
-            resp = None
-            if genai_backend.ativo():
-                resp = genai_backend.propor_resposta(topico["assunto"], corpo_completo, destaque)
-            if not resp:
-                resp = propor_resposta(topico["assunto"], corpo_completo, destaque)
-            registro["_resp"] = resp
-            registro["_resp_n"] = n
-        resposta_sugerida = registro["_resp"]
-
         return {
             "chave": topico["chave"],
             "assunto": topico["assunto"],
             "pessoa_destaque": destaque,
             "participantes": sorted(topico["pessoas"]),
             "qtd_mensagens": len(registro["mensagens"]),  # total acumulado
-            "resumo": resumo,                  # texto (fallback / dedup)
-            "resumo_bullets": resumo_bullets,  # [{autor, ponto}] da chain
-            "resumo_fonte": registro.get("_resumo_fonte", "local"),  # gemini|local
-            "resposta_sugerida": resposta_sugerida,
-            "historico_resumos": registro["resumos"][-5:],  # últimos snapshots
-            "qtd_resumos": len(registro["resumos"]),
+            "resumo": resumo,  # {visao_geral, pontos[], atencao[]} — 100% local
             "motivos": sorted(topico["motivos"]),
             "ultima_atualizacao": ultima["recebido"].strftime("%d/%m/%Y %H:%M"),
             # Campo auxiliar (ISO) usado só para ordenar no servidor.
