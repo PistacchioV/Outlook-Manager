@@ -570,19 +570,38 @@
   });
 
   const btnVarrer = document.getElementById("btn-varrer");
+  const SPIN_MIN_MS = 900;     // tempo MÍNIMO visível do giro (UX no simulado)
+  const SPIN_POLL_MS = 300;    // ritmo do poll durante o ciclo forçado
+  const SPIN_TIMEOUT_MS = 20000; // trava de segurança (Outlook real lento)
+
   btnVarrer.addEventListener("click", async () => {
-    if (pollVarredura) return;                 // já tem um ciclo em andamento
+    if (varrendoForcado) return;               // já tem um ciclo em andamento
+    varrendoForcado = true;                    // cobre até o await do POST
     setSpinner(true);                          // gira já, de forma otimista
+    const inicio = Date.now();
     const marcoInicial = ultimaVarreduraVista; // p/ detectar "concluiu"
     try { await api("/api/varrer-agora", "POST"); }
     catch (err) { console.error("Falha ao disparar varredura:", err); }
 
+    // Para o ciclo, mas só apaga o spinner depois do tempo mínimo visível —
+    // assim o usuário sempre VÊ o giro, mesmo quando a varredura é instantânea
+    // (caso do MODO_SIMULADO, onde o flag `varrendo` mal chega a ser True).
+    const parar = () => {
+      if (pollVarredura) { clearInterval(pollVarredura); pollVarredura = null; }
+      const restante = SPIN_MIN_MS - (Date.now() - inicio);
+      const finalizar = () => {
+        varrendoForcado = false;
+        setSpinner(false);
+        atualizarTopicos();                    // refresh final
+      };
+      if (restante > 0) setTimeout(finalizar, restante);
+      else finalizar();
+    };
+
     // Acompanha o estado REAL: gira enquanto o worker lê + resume e só para
-    // quando a varredura termina (ou após um timeout de segurança).
+    // quando a varredura termina (ou após o timeout de segurança).
     let viuComecar = false;
-    let tentativas = 0;
     pollVarredura = setInterval(async () => {
-      tentativas += 1;
       let varrendo = false;
       try {
         const data = await api("/api/topicos");
@@ -591,17 +610,13 @@
       } catch (err) { console.error(err); }
 
       if (varrendo) viuComecar = true;
-      const concluiu = viuComecar && !varrendo; // começou e terminou
+      const concluiu = viuComecar && !varrendo; // começou e terminou (real lento)
       const varreuRapido =                       // rápido demais p/ "ver" girar
         !varrendo && ultimaVarreduraVista && ultimaVarreduraVista !== marcoInicial;
+      const estourou = Date.now() - inicio >= SPIN_TIMEOUT_MS;
 
-      if (concluiu || varreuRapido || tentativas >= 25 /* ~15s */) {
-        clearInterval(pollVarredura);
-        pollVarredura = null;
-        setSpinner(false);
-        atualizarTopicos();                    // refresh final
-      }
-    }, 600);
+      if (concluiu || varreuRapido || estourou) parar();
+    }, SPIN_POLL_MS);
   });
 
   // =====================================================================
@@ -632,8 +647,9 @@
 
     ultimaVarreduraVista = data.ultima_varredura;
     // Fora de um clique em "Varrer agora", o spinner reflete o estado real
-    // do worker (o ciclo forçado, quando ativo, controla o spinner sozinho).
-    if (!pollVarredura) setSpinner(!!data.varrendo);
+    // do worker (o ciclo forçado, quando ativo, controla o spinner sozinho —
+    // `varrendoForcado` cobre inclusive a janela do await/tempo mínimo).
+    if (!varrendoForcado) setSpinner(!!data.varrendo);
 
     renderContaStatus(data);
   }
@@ -707,6 +723,7 @@
   let firstLoad = true;
   let pollVarredura = null;          // timer do ciclo forçado de "Varrer agora"
   let ultimaVarreduraVista = null;   // p/ detectar varredura concluída
+  let varrendoForcado = false;       // ciclo manual ativo (cobre await + giro mín.)
 
   function cardInnerHtml(t) {
     const motivos = (t.motivos || [])
